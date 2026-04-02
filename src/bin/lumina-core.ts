@@ -320,6 +320,27 @@ type FileCacheEntry = {
   grammarHash: string;
 };
 
+type DiagnosticLocationLike = Parameters<typeof highlightSnippet>[1];
+
+type ReportableDiagnostic = {
+  severity?: 'error' | 'warning' | 'info' | 'hint';
+  message: string;
+  code?: string | number;
+  location?: DiagnosticLocationLike;
+  relatedInformation?: Array<{
+    location?: DiagnosticLocationLike;
+    message: string;
+  }>;
+};
+
+type CompileLuminaResult =
+  | { ok: false }
+  | {
+      ok: true;
+      map?: RawSourceMap;
+      ir?: Parameters<typeof irToDot>[0];
+    };
+
 type BuildCache = {
   grammarHash: string | null;
   grammarText: string | null;
@@ -613,9 +634,9 @@ async function writeDiskCache(sourcePath: string, entry: FileCacheEntry) {
   }
 }
 
-function formatDiagnosticsWithSnippet(source: string, diagnostics: ReturnType<typeof analyzeLumina>['diagnostics']) {
+function formatDiagnosticsWithSnippet(source: string, diagnostics: readonly ReportableDiagnostic[]) {
   for (const diag of diagnostics) {
-    const code = diag.code ?? 'DIAG';
+    const code = diag.code !== undefined ? String(diag.code) : 'DIAG';
     console.error(`[${code}] ${diag.message}`);
     const explanation = getDiagnosticExplanation(code);
     if (explanation.summary && explanation.code === code) {
@@ -631,27 +652,9 @@ function formatDiagnosticsWithSnippet(source: string, diagnostics: ReturnType<ty
   }
 }
 
-function reportDiagnosticsAndFail(
-  source: string,
-  diagnostics: Array<{
-    severity?: 'error' | 'warning' | 'info' | 'hint';
-    message: string;
-    code?: string;
-    location?: {
-      start: { line: number; column: number; offset?: number };
-      end: { line: number; column: number; offset?: number };
-    };
-    relatedInformation?: Array<{
-      location: {
-        start: { line: number; column: number; offset?: number };
-        end: { line: number; column: number; offset?: number };
-      };
-      message: string;
-    }>;
-  }>
-): false {
+function reportDiagnosticsAndFail(source: string, diagnostics: readonly ReportableDiagnostic[]): false {
   if (diagnostics.length > 0) {
-    formatDiagnosticsWithSnippet(source, diagnostics as never);
+    formatDiagnosticsWithSnippet(source, diagnostics);
   }
   return false;
 }
@@ -1345,7 +1348,7 @@ async function compileLumina(
   sourceMap: boolean,
   inlineSourceMap: boolean,
   stopOnUnresolvedMemberError: boolean
-) {
+): Promise<CompileLuminaResult> {
   if (target === 'dual') {
     const outDir = validateOutputPath(outPath);
     const esmOut = path.join(outDir, 'esm', 'index.js');
@@ -1536,7 +1539,7 @@ async function compileLumina(
     }
     await ensureRuntimeForOutput(outPath, target);
     console.log(`Lumina compiled (bundled): ${outPath}`);
-    return { ok: true, map: result.map, ir: optimized };
+    return { ok: true, map: result.map, ir: optimized ?? undefined };
   }
   const fileHash = hashText(source);
   const cached = buildCache.files.get(sourcePath);
@@ -1754,7 +1757,7 @@ async function compileLumina(
   };
   buildCache.files.set(sourcePath, entry);
   await writeDiskCache(sourcePath, entry);
-  return { ok: true, map: result.map, ir: optimized };
+  return { ok: true, map: result.map, ir: optimized ?? undefined };
 }
 
 async function checkLumina(
@@ -2267,7 +2270,10 @@ function createWorkerRunner(config: BuildConfig) {
   const workerPath = resolveWorkerPath();
   if (!workerPath) return null;
   const isCjs = workerPath.endsWith('.cjs');
-  const worker = new Worker(workerPath, { type: isCjs ? 'commonjs' : 'module' });
+  const worker = new Worker(
+    workerPath,
+    { type: isCjs ? 'commonjs' : 'module' } as unknown as ConstructorParameters<typeof Worker>[1]
+  );
   let requestId = 0;
   const pending = new Map<number, { resolve: (value: { ok: boolean; error?: string }) => void }>();
 
@@ -2282,7 +2288,7 @@ function createWorkerRunner(config: BuildConfig) {
 
   worker.on('error', (err) => {
     for (const entry of pending.values()) {
-      entry.resolve({ ok: false, error: err.message });
+      entry.resolve({ ok: false, error: (err as Error).message });
     }
     pending.clear();
   });

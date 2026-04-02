@@ -11,6 +11,7 @@ import {
   SymbolKind,
   SymbolInformation,
   Location,
+  Range,
   ReferenceParams,
   DefinitionParams,
   CodeAction,
@@ -32,6 +33,7 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 import { LuminaCommands } from 'lumina-language-client';
+import type { Location as LuminaLocation } from '../utils/index.js';
 
 import { compileGrammar } from '../grammar/index.js';
 import { ProjectContext } from '../project/context.js';
@@ -187,6 +189,17 @@ function findImportedSymbolInfo(name: string, uri: string) {
   return undefined;
 }
 
+const toLspRange = (location: LuminaLocation | undefined): Range => ({
+  start: {
+    line: Math.max(0, (location?.start.line ?? 1) - 1),
+    character: Math.max(0, (location?.start.column ?? 1) - 1),
+  },
+  end: {
+    line: Math.max(0, (location?.end.line ?? location?.start.line ?? 1) - 1),
+    character: Math.max(0, (location?.end.column ?? location?.start.column ?? 1) - 1),
+  },
+});
+
 function publishDiagnostics(uri: string) {
   if (!project) return;
   const diags = project.getDiagnostics(uri).slice(0, settings.maxDiagnostics ?? 200);
@@ -202,20 +215,20 @@ function publishDiagnostics(uri: string) {
     message: d.message,
     source: d.source ?? 'lumina',
     code: d.code,
-    range: {
-      start: { line: d.location.start.line - 1, character: d.location.start.column - 1 },
-      end: { line: d.location.end.line - 1, character: d.location.end.column - 1 },
-    },
-    relatedInformation: d.relatedInformation?.map((info) => ({
-      location: {
-        uri,
-        range: {
-          start: { line: info.location.start.line - 1, character: info.location.start.column - 1 },
-          end: { line: info.location.end.line - 1, character: info.location.end.column - 1 },
-        },
-      },
-      message: info.message,
-    })),
+    range: toLspRange(d.location),
+    relatedInformation: d.relatedInformation?.flatMap((info) =>
+      info.location
+        ? [
+            {
+              location: {
+                uri,
+                range: toLspRange(info.location),
+              },
+              message: info.message,
+            },
+          ]
+        : []
+    ),
   }));
   connection.sendDiagnostics({ uri, diagnostics: lspDiagnostics });
 }

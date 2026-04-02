@@ -1258,7 +1258,7 @@ function suppressDiagnosticCascade(list: Diagnostic[]): Diagnostic[] {
   if (list.length <= 1) return list;
   const parseErrors = list.filter((diag) => diag.code === 'PARSE_ERROR' && diag.severity === 'error');
   const firstParseLine = parseErrors.reduce<number>(
-    (min, diag) => Math.min(min, diag.location.start.line),
+    (min, diag) => Math.min(min, diag.location?.start.line ?? min),
     Number.POSITIVE_INFINITY
   );
   const hasParseErrors = Number.isFinite(firstParseLine);
@@ -1276,7 +1276,7 @@ function suppressDiagnosticCascade(list: Diagnostic[]): Diagnostic[] {
   const filtered: Diagnostic[] = [];
   let postParseErrorCount = 0;
   for (const diag of list) {
-    const line = diag.location.start.line;
+    const line = diag.location?.start.line ?? 0;
     const code = String(diag.code ?? '');
     const isError = diag.severity === 'error';
 

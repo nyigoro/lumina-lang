@@ -74,9 +74,10 @@ async function loadWorkspacePackages(root: string): Promise<Map<string, Workspac
     path.join(root, 'package.json')
   );
   const patterns: string[] = [];
-  if (Array.isArray(pkg?.workspaces)) patterns.push(...pkg!.workspaces);
-  if (pkg?.workspaces && typeof pkg.workspaces === 'object' && Array.isArray(pkg.workspaces.packages)) {
-    patterns.push(...pkg.workspaces.packages);
+  const workspaces = pkg?.workspaces;
+  if (Array.isArray(workspaces)) patterns.push(...workspaces);
+  if (workspaces && !Array.isArray(workspaces) && Array.isArray(workspaces.packages)) {
+    patterns.push(...workspaces.packages);
   }
   if (patterns.length === 0) return new Map();
 

@@ -28,7 +28,6 @@
     "src/**/*",
     "cli/**/*",
     "scripts/**/*.ts",
-    "tests/**/*",
     "types/**/*",
     "*.config.js",
     "*.config.ts",
@@ -39,7 +38,8 @@
   "exclude": [
     "node_modules",
     "dist",
-    "build"
+    "build",
+    "scripts/benchmark"
   ],
   "ts-node": {
     "esm": true,

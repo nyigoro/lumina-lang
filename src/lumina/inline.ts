@@ -845,7 +845,7 @@ function identifierUsageCount(expr: LuminaExpr, name: string): number {
         return;
       case 'Call':
         if (node.receiver) visit(node.receiver);
-        for (const arg of node.args ?? []) visit(arg);
+        for (const arg of node.args ?? []) visit(arg.value);
         return;
       case 'Member':
         visit(node.object);
@@ -955,7 +955,7 @@ function tryInlineCalleeExpression(
   for (let i = 0; i < callee.params.length; i++) {
     const original = callee.params[i].name;
     const renamed = inlineScope.renameMap.get(original) ?? original;
-    env.set(renamed, cloneExpr(callNode.args[i]));
+    env.set(renamed, cloneExpr(callNode.args[i].value));
   }
 
   for (const [original, renamed] of inlineScope.renameMap.entries()) {

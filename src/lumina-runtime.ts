@@ -2,6 +2,8 @@ export type LuminaEnumLike =
   | { $tag: string; $payload?: unknown }
   | { tag: string; values?: unknown[] };
 
+declare const WorkerGlobalScope: (new () => unknown) | undefined;
+
 const isEnumLike = (value: unknown): value is LuminaEnumLike => {
   if (!value || typeof value !== 'object') return false;
   const v = value as { $tag?: string; tag?: string };
@@ -505,7 +507,7 @@ export const __lumina_index = (target: unknown, index: unknown, expectedSize?: n
   if (target && typeof (target as { get?: (idx: number) => unknown }).get === 'function') {
     const result = (target as { get: (idx: number) => unknown }).get(Math.trunc(Number(index)));
     const tag = result && typeof result === 'object' && isEnumLike(result) ? getEnumTag(result) : '';
-    if (tag === 'Some') return getEnumPayload(result);
+    if (tag === 'Some') return getEnumPayload(result as LuminaEnumLike);
     const err = new LuminaPanic('Index out of bounds', result);
     if (Error.captureStackTrace) {
       Error.captureStackTrace(err, __lumina_index);
@@ -846,10 +848,14 @@ export const io = {
       }
       if (stdin?.isTTY) {
         const readline = await import('node:readline');
-        const rl = readline.createInterface({
-          input: nodeProcess?.stdin,
-          output: nodeProcess?.stdout,
-        });
+        const rl = nodeProcess?.stdout
+          ? readline.createInterface({
+              input: stdin,
+              output: nodeProcess.stdout,
+            })
+          : readline.createInterface({
+              input: stdin,
+            });
         return await new Promise((resolve) => {
           rl.question('', (answer) => {
             rl.close();
@@ -964,7 +970,7 @@ const getOpfsRoot = async (): Promise<OpfsDirectoryLike> => {
   if (typeof getter !== 'function') {
     throw new Error('OPFS is not available in this environment');
   }
-  return await getter.call(nav.storage);
+  return await getter.call(nav!.storage);
 };
 
 const opfsError = (error: unknown): string => {
@@ -2020,7 +2026,7 @@ const utf8Encode = (value: string): Uint8Array => new TextEncoder().encode(value
 const utf8Decode = (value: Uint8Array): string => new TextDecoder().decode(value);
 
 const deriveAesKey = async (web: Crypto, key: string, usage: 'encrypt' | 'decrypt'): Promise<CryptoKey> => {
-  const digest = await web.subtle.digest('SHA-256', utf8Encode(key));
+  const digest = await web.subtle.digest('SHA-256', utf8Encode(key) as unknown as BufferSource);
   return await web.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, [usage]);
 };
 
@@ -2030,7 +2036,7 @@ export const crypto = {
     try {
       const web = await getWebCrypto();
       if (!web) return Result.Err('Crypto API is not available');
-      const digest = await web.subtle.digest('SHA-256', utf8Encode(value));
+      const digest = await web.subtle.digest('SHA-256', utf8Encode(value) as unknown as BufferSource);
       return Result.Ok(toHex(new Uint8Array(digest)));
     } catch (error) {
       return Result.Err(String(error));
@@ -2042,12 +2048,12 @@ export const crypto = {
       if (!web) return Result.Err('Crypto API is not available');
       const cryptoKey = await web.subtle.importKey(
         'raw',
-        utf8Encode(key),
+        utf8Encode(key) as unknown as BufferSource,
         { name: 'HMAC', hash: 'SHA-256' },
         false,
         ['sign']
       );
-      const signature = await web.subtle.sign('HMAC', cryptoKey, utf8Encode(value));
+      const signature = await web.subtle.sign('HMAC', cryptoKey, utf8Encode(value) as unknown as BufferSource);
       return Result.Ok(toHex(new Uint8Array(signature)));
     } catch (error) {
       return Result.Err(String(error));
@@ -2090,7 +2096,11 @@ export const crypto = {
       const aesKey = await deriveAesKey(web, key, 'encrypt');
       const iv = new Uint8Array(12);
       web.getRandomValues(iv);
-      const encrypted = await web.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, utf8Encode(plaintext));
+      const encrypted = await web.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        utf8Encode(plaintext) as unknown as BufferSource
+      );
       const cipherBytes = new Uint8Array(encrypted);
       const packed = new Uint8Array(iv.length + cipherBytes.length);
       packed.set(iv, 0);
@@ -2363,7 +2373,9 @@ export const vec = {
 
 const compareOrder = (left: unknown, right: unknown): number => {
   if (left === right) return 0;
-  return left < right ? -1 : 1;
+  const leftComparable = left as string | number | bigint | boolean;
+  const rightComparable = right as string | number | bigint | boolean;
+  return leftComparable < rightComparable ? -1 : 1;
 };
 
 const normalizeCount = (value: number): number => (Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0);
@@ -2376,7 +2388,7 @@ export const iter = {
   filter_option: <A>(value: unknown, pred: (input: A) => boolean): unknown => {
     const tag = value && typeof value === 'object' && isEnumLike(value) ? getEnumTag(value) : '';
     if (tag !== 'Some') return Option.None;
-    const payload = getEnumPayload(value) as A;
+    const payload = getEnumPayload(value as LuminaEnumLike) as A;
     return pred(payload) ? Option.Some(payload) : Option.None;
   },
   zip_vec: <A, B>(left: Vec<A>, right: Vec<B>): Vec<[A, B]> => vec.zip(left, right),
@@ -2805,7 +2817,9 @@ const compareBTreeKeys = (left: unknown, right: unknown): number => {
   const leftType = typeof left;
   const rightType = typeof right;
   if (leftType === rightType && (leftType === 'number' || leftType === 'bigint' || leftType === 'string' || leftType === 'boolean')) {
-    return left < right ? -1 : 1;
+    const leftComparable = left as string | number | bigint | boolean;
+    const rightComparable = right as string | number | bigint | boolean;
+    return leftComparable < rightComparable ? -1 : 1;
   }
   const leftText = formatValue(left, { color: false });
   const rightText = formatValue(right, { color: false });
@@ -3055,12 +3069,12 @@ export const Option = {
   None: { $tag: 'None' },
   map: (fn: (value: unknown) => unknown, opt: unknown) => {
     const tag = opt && typeof opt === 'object' && isEnumLike(opt) ? getEnumTag(opt) : '';
-    if (tag === 'Some') return Option.Some(fn(getEnumPayload(opt)));
+    if (tag === 'Some') return Option.Some(fn(getEnumPayload(opt as LuminaEnumLike)));
     return Option.None;
   },
   and_then: (fn: (value: unknown) => unknown, opt: unknown) => {
     const tag = opt && typeof opt === 'object' && isEnumLike(opt) ? getEnumTag(opt) : '';
-    if (tag === 'Some') return fn(getEnumPayload(opt));
+    if (tag === 'Some') return fn(getEnumPayload(opt as LuminaEnumLike));
     return Option.None;
   },
   or_else: (fallback: () => unknown, opt: unknown) => {
@@ -3070,7 +3084,7 @@ export const Option = {
   },
   unwrap_or: (fallback: unknown, opt: unknown) => {
     const tag = opt && typeof opt === 'object' && isEnumLike(opt) ? getEnumTag(opt) : '';
-    if (tag === 'Some') return getEnumPayload(opt);
+    if (tag === 'Some') return getEnumPayload(opt as LuminaEnumLike);
     return fallback;
   },
   is_some: (opt: unknown) => {
@@ -3083,7 +3097,7 @@ export const Option = {
   },
   unwrap: (opt: unknown, message?: string) => {
     const tag = opt && typeof opt === 'object' && isEnumLike(opt) ? getEnumTag(opt) : '';
-    if (tag === 'Some') return getEnumPayload(opt);
+    if (tag === 'Some') return getEnumPayload(opt as LuminaEnumLike);
     const rendered = formatValue(opt);
     const msg = message ?? `Tried to unwrap None: ${rendered}`;
     const err = new LuminaPanic(msg, opt);
@@ -3099,22 +3113,22 @@ export const Result = {
   Err: (error: unknown) => ({ $tag: 'Err', $payload: error }),
   map: (fn: (value: unknown) => unknown, res: unknown) => {
     const tag = res && typeof res === 'object' && isEnumLike(res) ? getEnumTag(res) : '';
-    if (tag === 'Ok') return Result.Ok(fn(getEnumPayload(res)));
+    if (tag === 'Ok') return Result.Ok(fn(getEnumPayload(res as LuminaEnumLike)));
     return res;
   },
   and_then: (fn: (value: unknown) => unknown, res: unknown) => {
     const tag = res && typeof res === 'object' && isEnumLike(res) ? getEnumTag(res) : '';
-    if (tag === 'Ok') return fn(getEnumPayload(res));
+    if (tag === 'Ok') return fn(getEnumPayload(res as LuminaEnumLike));
     return res;
   },
   or_else: (fn: (error: unknown) => unknown, res: unknown) => {
     const tag = res && typeof res === 'object' && isEnumLike(res) ? getEnumTag(res) : '';
     if (tag === 'Ok') return res;
-    return fn(getEnumPayload(res));
+    return fn(getEnumPayload(res as LuminaEnumLike));
   },
   unwrap_or: (fallback: unknown, res: unknown) => {
     const tag = res && typeof res === 'object' && isEnumLike(res) ? getEnumTag(res) : '';
-    if (tag === 'Ok') return getEnumPayload(res);
+    if (tag === 'Ok') return getEnumPayload(res as LuminaEnumLike);
     return fallback;
   },
   is_ok: (res: unknown) => {
@@ -3337,7 +3351,7 @@ export class Receiver<T> {
       const data = event.data;
       if (isChannelClose(data)) {
         this.closed = true;
-        this.flushWaiters(Option.None);
+        this.flushWaiters(Option.None as { $tag: string; $payload?: T });
         return;
       }
       if (isChannelAck(data)) {
@@ -3346,7 +3360,7 @@ export class Receiver<T> {
       const value = (isChannelValue(data) ? data.__lumina_channel_value : data) as T;
       const waiter = this.waiters.shift();
       if (waiter) {
-        waiter(Option.Some(value));
+        waiter(Option.Some(value) as { $tag: string; $payload?: T });
         this.sendAckIfNeeded();
       } else {
         this.queue.push(value);
@@ -3355,7 +3369,7 @@ export class Receiver<T> {
     this.port.onmessageerror = () => {
       this.closed = true;
       this.errorMessage = 'channel message error';
-      this.flushWaiters(Option.None);
+      this.flushWaiters(Option.None as { $tag: string; $payload?: T });
     };
     this.port.start?.();
   }
@@ -3377,7 +3391,7 @@ export class Receiver<T> {
     if (this.queue.length > 0) {
       const value = this.queue.shift();
       this.sendAckIfNeeded();
-      return Promise.resolve(Option.Some(value as T));
+      return Promise.resolve(Option.Some(value as T) as { $tag: string; $payload?: T });
     }
     if (this.closed) {
       return Promise.resolve(Option.None);
@@ -3395,7 +3409,7 @@ export class Receiver<T> {
     if (this.queue.length > 0) {
       const value = this.queue.shift();
       this.sendAckIfNeeded();
-      return Option.Some(value as T);
+      return Option.Some(value as T) as { $tag: string; $payload?: T };
     }
     return Option.None;
   }
@@ -3484,18 +3498,18 @@ export const async_channel = channel;
 type OptionLike = { $tag: string; $payload?: unknown };
 
 interface NodeWorkerLike {
-  postMessage: (value: unknown) => void;
-  terminate: () => Promise<number>;
-  on: (event: 'message', listener: (value: unknown) => void) => void;
-  on: (event: 'error', listener: (error: Error) => void) => void;
-  on: (event: 'exit', listener: (code: number) => void) => void;
+  postMessage(value: unknown): void;
+  terminate(): Promise<number>;
+  on(event: 'message', listener: (value: unknown) => void): void;
+  on(event: 'error', listener: (error: Error) => void): void;
+  on(event: 'exit', listener: (code: number) => void): void;
 }
 
 interface WebWorkerLike {
-  postMessage: (value: unknown) => void;
-  terminate: () => void;
-  addEventListener: (type: 'message', listener: (event: MessageEvent<unknown>) => void) => void;
-  addEventListener: (type: 'error', listener: (event: ErrorEvent) => void) => void;
+  postMessage(value: unknown): void;
+  terminate(): void;
+  addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(type: 'error', listener: (event: ErrorEvent) => void): void;
 }
 
 type ThreadWorker = { kind: 'node'; worker: NodeWorkerLike } | { kind: 'web'; worker: WebWorkerLike };
@@ -5366,7 +5380,7 @@ export const webgpu = {
             compute: { module: shaderModule, entryPoint: String(entryPoint) },
           });
 
-      const bindGroup = device.createBindGroup({
+      const bindGroup = device.createBindGroup!({
         layout: (pipeline as { getBindGroupLayout: (index: number) => unknown }).getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: inputBuffer } },
@@ -5375,7 +5389,7 @@ export const webgpu = {
       });
 
       const encoder = device.createCommandEncoder();
-      const pass = encoder.beginComputePass();
+      const pass = encoder.beginComputePass!();
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
       pass.dispatchWorkgroups(dispatchCount, 1, 1);
@@ -5767,7 +5781,7 @@ type DomEventStore = Map<DomNodeLike, DomEventMap>;
 
 const getDomDocument = (options?: DomRendererOptions): DomDocumentLike => {
   if (options?.document) return options.document;
-  const doc = (globalThis as { document?: DomDocumentLike }).document;
+  const doc = (globalThis as unknown as { document?: DomDocumentLike }).document;
   if (!doc) {
     throw new Error('DOM renderer requires a document-like object');
   }
@@ -5849,16 +5863,16 @@ const setDomProperty = (
 
   if (value === false || value === null || value === undefined) {
     if (element.removeAttribute) element.removeAttribute(name);
-    (element as Record<string, unknown>)[name] = value as never;
+    (element as unknown as Record<string, unknown>)[name] = value as never;
     return;
   }
 
   if (name in element) {
-    (element as Record<string, unknown>)[name] = value;
+    (element as unknown as Record<string, unknown>)[name] = value;
   } else if (element.setAttribute) {
     element.setAttribute(name, String(value));
   } else {
-    (element as Record<string, unknown>)[name] = value;
+    (element as unknown as Record<string, unknown>)[name] = value;
   }
 };
 
@@ -6629,7 +6643,11 @@ export const createEffect = (fn: (onCleanup: (cleanup: ReactiveCleanup) => void)
 export const vnode = (tag: string, attrs?: Record<string, unknown> | null, children: VNodeInput = []): VNode =>
   render.element(tag, attrs, children);
 export const text = (value: unknown): VNode => render.text(value);
-export const mount_reactive = (renderer: unknown, container: unknown, view: () => VNode): ReactiveRenderRoot =>
+export const mount_reactive = (
+  renderer: unknown,
+  container: unknown,
+  view: () => VNode
+): ReturnType<typeof render.mount_reactive> =>
   render.mount_reactive(renderer, container, view);
 export const props_empty = (): Record<string, unknown> => render.props_empty();
 export const props_class = (className: string): Record<string, unknown> => render.props_class(className);
@@ -6658,7 +6676,7 @@ const mapHashMapValues = <K, V, U>(map: HashMap<K, V>, mapper: (value: V) => U):
   for (const key of map.keys()) {
     const current = map.get(key);
     if (current && typeof current === 'object' && (current as { $tag?: string }).$tag === 'Some') {
-      out.insert(key, mapper((current as { $payload: V }).$payload));
+      out.insert(key, mapper((current as unknown as { $payload: V }).$payload));
     }
   }
   return out;
@@ -6688,9 +6706,9 @@ const apHashMapValues = <K, A, B>(
     ) {
       continue;
     }
-    const fn = (fnEntry as { $payload: unknown }).$payload;
+    const fn = (fnEntry as unknown as { $payload: unknown }).$payload;
     if (typeof fn !== 'function') continue;
-    out.insert(key, (fn as (input: A) => B)((valueEntry as { $payload: A }).$payload));
+    out.insert(key, (fn as (input: A) => B)((valueEntry as unknown as { $payload: A }).$payload));
   }
   return out;
 };
@@ -6703,7 +6721,7 @@ const flatMapHashMapValues = <K, A, B>(
   for (const key of values.keys()) {
     const current = values.get(key);
     if (!current || typeof current !== 'object' || (current as { $tag?: string }).$tag !== 'Some') continue;
-    const mapped = mapper((current as { $payload: A }).$payload);
+    const mapped = mapper((current as unknown as { $payload: A }).$payload);
     if (!(mapped instanceof HashMap)) continue;
     for (const mappedKey of mapped.keys()) {
       const mappedValue = mapped.get(mappedKey);
@@ -6712,7 +6730,7 @@ const flatMapHashMapValues = <K, A, B>(
         typeof mappedValue === 'object' &&
         (mappedValue as { $tag?: string }).$tag === 'Some'
       ) {
-        out.insert(mappedKey, (mappedValue as { $payload: B }).$payload);
+        out.insert(mappedKey, (mappedValue as unknown as { $payload: B }).$payload);
       }
     }
   }
@@ -6737,18 +6755,18 @@ export const applicative = {
     const fnTag = fns && typeof fns === 'object' && isEnumLike(fns) ? getEnumTag(fns) : '';
     const valueTag = value && typeof value === 'object' && isEnumLike(value) ? getEnumTag(value) : '';
     if (fnTag !== 'Some' || valueTag !== 'Some') return Option.None;
-    const fn = getEnumPayload(fns);
+    const fn = getEnumPayload(fns as LuminaEnumLike);
     if (typeof fn !== 'function') return Option.None;
-    return Option.Some((fn as (arg: A) => B)(getEnumPayload(value) as A));
+    return Option.Some((fn as (arg: A) => B)(getEnumPayload(value as LuminaEnumLike) as A));
   },
   ap_result: <A, B>(fns: unknown, value: unknown): unknown => {
     const fnTag = fns && typeof fns === 'object' && isEnumLike(fns) ? getEnumTag(fns) : '';
     if (fnTag !== 'Ok') return fns;
     const valueTag = value && typeof value === 'object' && isEnumLike(value) ? getEnumTag(value) : '';
     if (valueTag !== 'Ok') return value;
-    const fn = getEnumPayload(fns);
+    const fn = getEnumPayload(fns as LuminaEnumLike);
     if (typeof fn !== 'function') return Result.Err('Result ap expected Ok(function)');
-    return Result.Ok((fn as (arg: A) => B)(getEnumPayload(value) as A));
+    return Result.Ok((fn as (arg: A) => B)(getEnumPayload(value as LuminaEnumLike) as A));
   },
   ap_vec: <A, B>(fns: Vec<(input: A) => B>, values: Vec<A>): Vec<B> => {
     const out = Vec.new<B>();
@@ -6797,12 +6815,12 @@ export const foldable = {
   fold_option: <A, B>(value: unknown, init: B, folder: (acc: B, input: A) => B): B => {
     const tag = value && typeof value === 'object' && isEnumLike(value) ? getEnumTag(value) : '';
     if (tag !== 'Some') return init;
-    return folder(init, getEnumPayload(value) as A);
+    return folder(init, getEnumPayload(value as LuminaEnumLike) as A);
   },
   fold_result: <A, B>(value: unknown, init: B, folder: (acc: B, input: A) => B): B => {
     const tag = value && typeof value === 'object' && isEnumLike(value) ? getEnumTag(value) : '';
     if (tag !== 'Ok') return init;
-    return folder(init, getEnumPayload(value) as A);
+    return folder(init, getEnumPayload(value as LuminaEnumLike) as A);
   },
   fold_vec: <A, B>(values: Vec<A>, init: B, folder: (acc: B, input: A) => B): B => vec.fold(values, init, folder),
   fold_hashmap_values: <K, V, B>(
@@ -6825,7 +6843,7 @@ export const traversable = {
       const mapped = mapper(value);
       const tag = mapped && typeof mapped === 'object' && isEnumLike(mapped) ? getEnumTag(mapped) : '';
       if (tag !== 'Some') return Option.None;
-      out.push(getEnumPayload(mapped) as B);
+      out.push(getEnumPayload(mapped as LuminaEnumLike) as B);
     }
     return Option.Some(out);
   },
@@ -6835,7 +6853,7 @@ export const traversable = {
       const mapped = mapper(value);
       const tag = mapped && typeof mapped === 'object' && isEnumLike(mapped) ? getEnumTag(mapped) : '';
       if (tag !== 'Ok') return mapped;
-      out.push(getEnumPayload(mapped) as B);
+      out.push(getEnumPayload(mapped as LuminaEnumLike) as B);
     }
     return Result.Ok(out);
   },

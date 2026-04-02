@@ -1,6 +1,7 @@
 import {
   CodeAction,
   CodeActionKind,
+  Diagnostic,
   Range,
   TextEdit,
   WorkspaceEdit,
@@ -97,12 +98,7 @@ function buildIsToMatchAction(text: string, uri: string, range: Range): CodeActi
 export function getCodeActionsForDiagnostics(
   text: string,
   uri: string,
-  diagnostics: Array<{
-    message: string;
-    code?: string | number;
-    range: Range;
-    relatedInformation?: Array<{ message: string; location?: { uri: string; range: Range } }>;
-  }>,
+  diagnostics: Diagnostic[],
   options?: { range?: Range }
 ): CodeAction[] {
   const lines = text.split(/\r?\n/);

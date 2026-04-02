@@ -611,7 +611,7 @@ const evalStmt = (
   fnName: string
 ): EvalState => {
   const stepError = tick(env, fnName, stmt.location);
-  if (stepError) return { ok: false, error: stepError.error };
+  if (stepError && !stepError.ok) return { ok: false, error: stepError.error };
 
   switch (stmt.type) {
     case 'Let': {
@@ -1196,7 +1196,9 @@ export function comptimePass(ast: LuminaProgram): ComptimePassResult {
   const diagKeys = new Set<string>();
   for (const error of failed) {
     const diag = toDiagnostic(error);
-    const key = `${diag.code ?? 'COMPTIME'}|${diag.message}|${diag.location.start.line}:${diag.location.start.column}`;
+    const line = diag.location?.start.line ?? 0;
+    const column = diag.location?.start.column ?? 0;
+    const key = `${diag.code ?? 'COMPTIME'}|${diag.message}|${line}:${column}`;
     if (diagKeys.has(key)) continue;
     diagKeys.add(key);
     diagnostics.push(diag);

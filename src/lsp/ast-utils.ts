@@ -91,12 +91,23 @@ function nodeStartOffset(node: { type?: string; location?: Location }, text: str
   return startOffset;
 }
 
-function nodeEndOffset(node: { type?: string; location?: Location; body?: LuminaBlock | null }, text: string): number {
+type NodeWithLocationBody = { type?: string; location?: Location; body?: unknown | null };
+
+const getBodyLocation = (body: unknown): Location | undefined => {
+  if (!body || typeof body !== 'object' || !('location' in body)) return undefined;
+  return (body as { location?: Location }).location;
+};
+
+function nodeEndOffset(
+  node: NodeWithLocationBody,
+  text: string
+): number {
   const location = node.location;
   const defaultEnd = location?.end.offset ?? offsetAt(text, rangeFromLocation(location).end);
   if (node.type === 'Import') return defaultEnd;
-  if ((node.type === 'FnDecl' || node.type === 'TraitMethod') && node.body?.location) {
-    return node.body.location.end.offset ?? offsetAt(text, rangeFromLocation(node.body.location).end);
+  const bodyLocation = getBodyLocation(node.body);
+  if ((node.type === 'FnDecl' || node.type === 'TraitMethod') && bodyLocation) {
+    return bodyLocation.end.offset ?? offsetAt(text, rangeFromLocation(bodyLocation).end);
   }
   if (
     node.type === 'StructDecl' ||
@@ -116,7 +127,10 @@ function nodeEndOffset(node: { type?: string; location?: Location; body?: Lumina
   return defaultEnd;
 }
 
-export function rangeOfNode(node: { type?: string; location?: Location; body?: LuminaBlock | null }, text: string): Range {
+export function rangeOfNode(
+  node: NodeWithLocationBody,
+  text: string
+): Range {
   const start = nodeStartOffset(node, text);
   const end = nodeEndOffset(node, text);
   return {
@@ -125,7 +139,10 @@ export function rangeOfNode(node: { type?: string; location?: Location; body?: L
   };
 }
 
-export function textOfNode(node: { type?: string; location?: Location; body?: LuminaBlock | null }, text: string): string {
+export function textOfNode(
+  node: NodeWithLocationBody,
+  text: string
+): string {
   const range = rangeOfNode(node, text);
   return text.slice(offsetAt(text, range.start), offsetAt(text, range.end));
 }

@@ -194,14 +194,14 @@ export class DiagnosticCollector {
 export interface Diagnostic {
   severity: 'error' | 'warning' | 'info' | 'hint';
   message: string;
-  location: Location;
+  location?: Location;
   code?: string;
   source?: string;
   relatedInformation?: DiagnosticRelatedInformation[];
 }
 
 export interface DiagnosticRelatedInformation {
-  location: Location;
+  location?: Location;
   message: string;
 }
 

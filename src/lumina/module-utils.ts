@@ -61,7 +61,7 @@ export function buildModuleFunctionFromSymbol(sym: SymbolInfo): ModuleFunction |
   for (const tp of sym.typeParams ?? []) {
     const v = freshTypeVar();
     typeParams.set(tp.name, v);
-    typeVarIds.push(v.id);
+    if (v.kind === 'variable') typeVarIds.push(v.id);
   }
   const hmArgs = paramTypes.map((p) => parseLuminaType(p, typeParams));
   const hmReturn = parseLuminaType(returnType, typeParams);

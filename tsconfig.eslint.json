@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/**/*",
+    "cli/**/*",
+    "scripts/**/*.ts",
+    "tests/**/*",
+    "types/**/*",
+    "*.config.js",
+    "*.config.ts",
+    "jest.config.ts",
+    "prettier.config.cjs",
+    "eslint.config.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build"
+  ]
+}

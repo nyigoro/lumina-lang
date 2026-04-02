@@ -83,7 +83,7 @@ export function parseIntegrity(
     stderr.write(`Warning: missing integrity for ${key}; package verification will fail until the lockfile is refreshed.\n`);
     return MISSING_INTEGRITY;
   }
-  return normalizeIntegrity(value.trim());
+  return normalizeIntegrity((value ?? '').trim());
 }
 
 export function integrityStatus(

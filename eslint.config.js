@@ -16,7 +16,7 @@ export default [
       parserOptions: {
         ecmaVersion: 2021,
         sourceType: 'module',
-        project: './tsconfig.json',
+        project: './tsconfig.eslint.json',
       },
       globals: {
         console: 'readonly',
@@ -130,7 +130,7 @@ export default [
       parserOptions: {
         ecmaVersion: 2021,
         sourceType: 'module',
-        project: './tsconfig.json',
+        project: './tsconfig.eslint.json',
       },
       globals: {
         describe: 'readonly',
@@ -169,7 +169,7 @@ export default [
       parserOptions: {
         ecmaVersion: 2021,
         sourceType: 'module',
-        project: './tsconfig.json',
+        project: './tsconfig.eslint.json',
       },
       globals: {
         console: 'readonly',
@@ -204,7 +204,7 @@ export default [
       parserOptions: {
         ecmaVersion: 2021,
         sourceType: 'module',
-        project: './tsconfig.json',
+        project: './tsconfig.eslint.json',
       },
     },
     plugins: {

@@ -334,7 +334,8 @@ function findNodeAtPosition(program: unknown, position: { line: number; characte
   if (prog.type === 'Program' && Array.isArray(prog.body)) {
     prog.body.forEach(visitStmt);
   }
-  return best ? best.node : null;
+  const resolvedBest = best as { node: NodeWithId; size: number } | null;
+  return resolvedBest ? resolvedBest.node : null;
 }
 
 type CallNode = {
@@ -343,6 +344,7 @@ type CallNode = {
   callee?: { name: string; location?: { start: { line: number; column: number; offset: number }; end: { line: number; column: number; offset: number } } };
   enumName?: string | null;
   args?: unknown[];
+  receiver?: unknown;
   location?: { start: { line: number; column: number; offset: number }; end: { line: number; column: number; offset: number } };
 };
 
