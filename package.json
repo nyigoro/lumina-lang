@@ -1,6 +1,6 @@
 {
   "name": "lumina-lang",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "type": "module",
   "description": "A modern functional language with async/await, type inference, and package management",
   "main": "dist/index.cjs",
@@ -135,4 +135,3 @@
   },
   "homepage": "https://github.com/nyigoro/lumina-lang#readme"
 }
-
