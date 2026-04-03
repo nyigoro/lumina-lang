@@ -291,7 +291,7 @@
     "watch": "tsc -w -p ./tsconfig.json"
   },
   "dependencies": {
-    "lumina-language-client": "^0.5.2"
+    "lumina-language-client": "^0.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

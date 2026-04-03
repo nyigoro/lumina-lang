@@ -80,7 +80,7 @@
     "typescript"
   ],
   "author": "nyigoro",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.0",
