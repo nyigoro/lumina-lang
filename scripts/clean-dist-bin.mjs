@@ -22,6 +22,12 @@ const keep = new Set([
   'lumina-lsp.cjs',
   'lumina-lsp.cjs.map',
   'lumina-lsp.d.cts',
+  'lumina-repl.js',
+  'lumina-repl.js.map',
+  'lumina-repl.d.ts',
+  'lumina-repl.cjs',
+  'lumina-repl.cjs.map',
+  'lumina-repl.d.cts',
 ]);
 
 async function run() {

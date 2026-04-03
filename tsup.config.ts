@@ -2,7 +2,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/bin/lumina-repl.ts'],
   format: ['esm', 'cjs'],      // Output formats
   dts: false,                  // Emit .d.ts type declarations (handled by build:dts)
   sourcemap: true,

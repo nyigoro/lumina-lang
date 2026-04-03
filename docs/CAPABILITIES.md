@@ -1,7 +1,7 @@
 # Lumina Capabilities Matrix
 
 This document tracks the current state of the Lumina language/tooling and near‑term priorities.
-Last updated for v0.5.3.
+Last updated for v0.5.4.
 
 ## Strategic Focus
 - **Primary identity**: Web-native systems language (WASM + browser runtime first).
@@ -114,6 +114,7 @@ Last updated for v0.5.3.
 | Source maps | Stable | External + inline options |
 | Multi‑file module compilation | Stable | Module-graph topological compile is now the default path, with dependency ordering, per-module cache keys, export-aware invalidation, chokidar-backed watch batching, and `--bundled-compile` as a legacy opt-out |
 | Package management | Stable | Registry workflow (`lumina add`, `lumina install`, `lumina publish`, `lumina search`) with integrity enforcement, secret scanning on publish, CDN artifact coverage, richer search metadata/pagination UX, add/install edge-case tests, and lockfile migration |
+| CLI REPL | Beta | Compile-and-run REPL with persistent declaration context, history, `:load`/`:ctx`/`:clear`, and symbol-aware completion |
 | Web distribution tooling | Stable | `lumina bundle --target browser|wasm`, `lumina importmap`, browser lock generation (`lumina.browser.lock`), optional `lumina publish --cdn`, and browser CDN/import-map consumption smoke coverage |
 | JS↔WASM parity harness | Stable | `tests/parity/parity-harness.ts` + expanded parity matrix (core language, async loops/chains, Result `?`, GADT/HKT-shaped programs) with explicit wat2wasm availability gating |
 | Browser smoke CI | Stable | Playwright smoke suite for OPFS/SAB/WASM load/WebGPU/stdlib browser modules + CDN import-map path, with retries/traces, dedicated CI job gating (`LUMINA_BROWSER_SMOKE=1`), and GPU-specific local tooling via `npm run doctor:webgpu` / `npm run test:webgpu` |
@@ -121,6 +122,7 @@ Last updated for v0.5.3.
 | `lumina fmt` | Stable | Whitespace normalization + check mode |
 | `lumina lint` | Stable | Semantic diagnostics + style checks |
 | `lumina doc` | Stable | Markdown API extraction from declarations |
+| `lumina repl` | Beta | Interactive compile-and-run REPL with persistent declaration context |
 
 ---
 

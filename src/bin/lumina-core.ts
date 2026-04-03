@@ -39,7 +39,7 @@ import { extractImports } from '../project/imports.js';
 import { parseWithPanicRecovery } from '../project/panic.js';
 import { createLuminaLexer, luminaSyncTokenTypes, type LuminaToken } from '../lumina/lexer.js';
 import { collectStyleLintIssues, formatLuminaSource, generateLuminaDocsMarkdown } from '../lumina/tooling.js';
-import { runREPLWithParser } from '../repl.js';
+import { startLuminaRepl } from '../repl/repl.js';
 import { runParsergen } from './cli-core.js';
 import { type RawSourceMap } from 'source-map';
 import {
@@ -1929,9 +1929,7 @@ export async function checkLuminaTask(payload: {
 }
 
 async function runRepl(grammarPath: string) {
-  const grammarText = await fs.readFile(grammarPath, 'utf-8');
-  const parser = compileGrammar(grammarText);
-  runREPLWithParser(parser, grammarText);
+  await startLuminaRepl(grammarPath);
 }
 
 type WatchSession = {
@@ -2328,7 +2326,7 @@ Commands:
   doc [paths...]   Generate Markdown API docs
   watch <file>     Watch and recompile on change
   run-wasm <file>  Execute a .wasm file and print return value
-  repl             Interactive REPL with Lumina grammar
+  repl             Interactive compile-and-run Lumina REPL
   grammar          Parser generator tools (was parsergen)
   init             Initialize a parser project template
   add <pkg...>     Add package(s) from Lumina registry
