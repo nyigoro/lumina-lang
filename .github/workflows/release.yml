@@ -123,6 +123,15 @@ jobs:
           npm ci
           npm run build
 
+      - name: Verify lumina-language-client version match
+        run: |
+          CLIENT_VERSION=$(node -p "require('./packages/lumina-language-client/package.json').version")
+          TAG_VERSION=${{ steps.version.outputs.VERSION }}
+          if [ "$CLIENT_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: packages/lumina-language-client/package.json=$CLIENT_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
       - name: Check lumina-language-client version
         id: lumina_client_exists
         run: |
@@ -147,7 +156,7 @@ jobs:
       - name: Publish VS Code extension
         run: |
           cd vscode-extension
-          npm pkg set dependencies.lumina-language-client="0.5.3"
+          npm pkg set "dependencies.lumina-language-client=${{ steps.version.outputs.VERSION }}"
           npm ci --workspaces=false
           npm run build
           npx @vscode/vsce publish --pat ${{ secrets.VSCE_PAT }}
