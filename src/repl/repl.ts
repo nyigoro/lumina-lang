@@ -43,6 +43,14 @@ type EvaluationTarget =
 const REPL_HISTORY_FILE = path.join(os.homedir(), '.lumina_repl_history');
 const syncKeywordValues = ['import', 'type', 'struct', 'enum', 'fn', 'let', 'return', 'if', 'else', 'for', 'while', 'match', 'extern', 'pub'];
 
+function writeStdout(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
+function writeStderr(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
+
 export async function createReplEnvironment(grammarPath: string): Promise<ReplEnvironment> {
   const grammarText = await fsPromises.readFile(grammarPath, 'utf-8');
   return createReplEnvironmentFromGrammar(grammarText, grammarPath);
@@ -127,8 +135,8 @@ export async function startLuminaRepl(grammarPath: string): Promise<void> {
 
     loadHistory(rl as ReadlineWithHistory);
 
-    console.log('Lumina REPL');
-    console.log('Commands: :help, :clear, :ctx, :load <file>, :exit');
+    writeStdout('Lumina REPL');
+    writeStdout('Commands: :help, :clear, :ctx, :load <file>, :exit');
     rl.prompt();
 
     let buffer = '';
@@ -177,7 +185,7 @@ export async function startLuminaRepl(grammarPath: string): Promise<void> {
     });
 
     rl.on('close', () => {
-      console.log('Bye.');
+      writeStdout('Bye.');
       resolve();
     });
   });
@@ -190,23 +198,23 @@ async function handleCommand(
   rl: readline.Interface
 ): Promise<'handled' | 'exit'> {
   if (line === ':help') {
-    console.log('  :help       Show this message');
-    console.log('  :clear      Clear accumulated declarations');
-    console.log('  :ctx        Show the current declaration context');
-    console.log('  :load FILE  Load a Lumina source file into the current session');
-    console.log('  :exit       Exit the REPL');
+    writeStdout('  :help       Show this message');
+    writeStdout('  :clear      Clear accumulated declarations');
+    writeStdout('  :ctx        Show the current declaration context');
+    writeStdout('  :load FILE  Load a Lumina source file into the current session');
+    writeStdout('  :exit       Exit the REPL');
     return 'handled';
   }
 
   if (line === ':clear') {
     ctx.declarations.length = 0;
     ctx.symbolTable = null;
-    console.log('Context cleared.');
+    writeStdout('Context cleared.');
     return 'handled';
   }
 
   if (line === ':ctx') {
-    console.log(contextSource(ctx) || '(empty)');
+    writeStdout(contextSource(ctx) || '(empty)');
     return 'handled';
   }
 
@@ -218,7 +226,7 @@ async function handleCommand(
   if (line.startsWith(':load ')) {
     const target = line.slice(6).trim();
     if (!target) {
-      console.error('error: missing file path for :load');
+      writeStderr('error: missing file path for :load');
       return 'handled';
     }
     const resolved = path.resolve(target);
@@ -231,7 +239,7 @@ async function handleCommand(
         if (result.kind !== 'empty' && result.diagnostics && result.diagnostics.length > 0) {
           printResult({ kind: 'declaration', name: path.basename(resolved), diagnostics: result.diagnostics });
         } else {
-          console.log(`loaded: ${resolved}`);
+          writeStdout(`loaded: ${resolved}`);
         }
       }
     } catch (error) {
@@ -240,7 +248,7 @@ async function handleCommand(
     return 'handled';
   }
 
-  console.error(`error: unknown command '${line}'`);
+  writeStderr(`error: unknown command '${line}'`);
   return 'handled';
 }
 

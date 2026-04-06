@@ -2,6 +2,14 @@ import { inspect } from 'node:util';
 import type { Diagnostic } from '../parser/index.js';
 import type { ReplResult } from './repl.js';
 
+function writeStdout(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
+function writeStderr(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
+
 export function printResult(result: ReplResult): void {
   if (result.kind === 'empty') return;
 
@@ -15,11 +23,11 @@ export function printResult(result: ReplResult): void {
   }
 
   if (result.kind === 'declaration') {
-    console.log(`defined: ${result.name}`);
+    writeStdout(`defined: ${result.name}`);
     return;
   }
 
-  console.log(`=> ${formatValue(result.value)} : ${result.type}`);
+  writeStdout(`=> ${formatValue(result.value)} : ${result.type}`);
 }
 
 export function formatValue(value: unknown): string {
@@ -36,9 +44,9 @@ export function formatValue(value: unknown): string {
 function printDiagnostics(diagnostics: readonly Diagnostic[]): void {
   for (const diagnostic of diagnostics) {
     const code = diagnostic.code ? `[${diagnostic.code}] ` : '';
-    console.error(`${diagnostic.severity}: ${code}${diagnostic.message}`);
+    writeStderr(`${diagnostic.severity}: ${code}${diagnostic.message}`);
     if (diagnostic.location?.start) {
-      console.error(`  --> line ${diagnostic.location.start.line}, column ${diagnostic.location.start.column}`);
+      writeStderr(`  --> line ${diagnostic.location.start.line}, column ${diagnostic.location.start.column}`);
     }
   }
 }
