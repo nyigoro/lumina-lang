@@ -1,6 +1,6 @@
 {
   "name": "lumina-language-client",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Lumina LSP command protocol — editor-agnostic types and constants",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",

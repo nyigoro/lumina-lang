@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-04-06
+
 - **Tooling:** Added a compile-and-run Lumina REPL with persistent declaration context, history, `:load`/`:ctx`/`:clear` commands, and symbol-aware completion.
 - **UI runtime:** Expanded `@std/render` prop helpers with DOM-friendly `id/style/value/placeholder/href/disabled/key` setters plus text-input `on_input`/`on_change` handlers for larger Lumina browser UIs.
+- **Demo:** Shipped a Lumina-authored browser demo with a Vite `.lm` plugin, browser shims, and an in-browser compiler bridge.
+- **Editor tooling:** Expanded VS Code TextMate + semantic token highlighting for Lumina keywords, built-in types, declarations, and macro calls.
+- **Release hygiene:** Fixed REPL lint violations so release verification passes on tagged builds.
 
 ## [0.5.3] - 2026-03-12
 
