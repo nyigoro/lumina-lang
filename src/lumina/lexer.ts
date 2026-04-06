@@ -97,6 +97,14 @@ export const luminaSyncTokenTypes: TokenType[] = ['semicolon', 'rbrace'];
 
 type MooToken = moo.Token & { type: TokenType };
 
+const luminaKeywords = new Set([
+  'import', 'from', 'type', 'struct', 'enum', 'fn', 'let', 'return',
+  'if', 'else', 'for', 'while', 'match', 'true', 'false',
+  'pub', 'extern', 'as', 'async', 'await', 'ref', 'mut', 'move', 'is',
+  'try', 'comptime', 'macro_rules', 'where', 'in', 'break', 'continue',
+  'use', 'shader', 'compute', 'vertex', 'fragment',
+]);
+
 export interface LuminaLexer {
   reset(input: string): LuminaLexer;
   [Symbol.iterator](): Iterator<LuminaToken>;
@@ -122,12 +130,7 @@ export function createLuminaLexer(): LuminaLexer {
     colon: ':',
     arrow: '->',
     dot: '.',
-    op: ['==', '!=', '<=', '>=', '&&', '||', '+', '-', '*', '/', '%', '=', '<', '>'],
-    keyword: [
-      'import', 'from', 'type', 'struct', 'enum', 'fn', 'let', 'return',
-      'if', 'else', 'for', 'while', 'match', 'true', 'false',
-      'pub', 'extern', 'as', 'async', 'await', 'ref', 'mut', 'move', 'is',
-    ],
+    op: ['==', '!=', '<=', '>=', '&&', '||', '+', '-', '*', '/', '%', '=', '<', '>', '!'],
     string: [
       { match: /"(?:\\.|[^"\\])*"/, lineBreaks: false },
       { match: /'(?:\\.|[^'\\])*'/, lineBreaks: false },
@@ -161,16 +164,17 @@ export function createLuminaLexer(): LuminaLexer {
 
 function toLuminaToken(token: MooToken): LuminaToken {
   const text = token.value ?? '';
+  const normalizedType: TokenType = token.type === 'identifier' && luminaKeywords.has(text) ? 'keyword' : token.type;
   const base = {
-    type: token.type,
-    kind: kindFromType(token.type),
+    type: normalizedType,
+    kind: kindFromType(normalizedType),
     offset: token.offset ?? 0,
     line: token.line ?? 1,
     col: token.col ?? 1,
     text,
   };
 
-  switch (token.type) {
+  switch (normalizedType) {
     case 'number':
       return { ...base, kind: 'number', value: parseNumber(text) };
     case 'string':

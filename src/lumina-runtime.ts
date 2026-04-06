@@ -1605,6 +1605,39 @@ const createDomStubElement = (): {
 
 export const dom = {
   is_available: (): boolean => getDocumentHandle() !== null,
+  call_global_1: (name: string, arg: unknown): unknown => {
+    const key = String(name);
+    const fn = (globalThis as Record<string, unknown>)[key];
+    if (typeof fn !== 'function') {
+      return {
+        ok: false,
+        js: '',
+        output: `// Missing global function: ${key}`,
+        diagnostics: [{ severity: 'error', message: `Missing global function: ${key}` }],
+      };
+    }
+    try {
+      return (fn as (value: unknown) => unknown)(arg);
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : String(error);
+      return {
+        ok: false,
+        js: '',
+        output: `// ${message}`,
+        diagnostics: [{ severity: 'error', message }],
+      };
+    }
+  },
+  call_global_1_string: (name: string, arg: unknown): string => {
+    const value = dom.call_global_1(name, arg);
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      if (typeof record.output === 'string') return record.output;
+      if (typeof record.message === 'string') return record.message;
+    }
+    return value == null ? '' : String(value);
+  },
   query: (selector: string) => {
     const doc = getDocumentHandle();
     if (!doc) return Option.None;
@@ -6521,15 +6554,28 @@ export const render = {
     },
   }),
   props_on_click_dec: (signal: Signal<number>): Record<string, unknown> => ({
-    onClick: () => {
-      signal.set(signal.get() - 1);
-    },
-  }),
+      onClick: () => {
+        signal.set(signal.get() - 1);
+      },
+    }),
+  props_id: (id: string): Record<string, unknown> => ({ id }),
+  props_style: (style: string): Record<string, unknown> => ({ style }),
+  props_value: (value: string): Record<string, unknown> => ({ value }),
+  props_placeholder: (placeholder: string): Record<string, unknown> => ({ placeholder }),
+  props_href: (href: string): Record<string, unknown> => ({ href }),
+  props_disabled: (disabled: boolean): Record<string, unknown> => ({ disabled }),
+  props_on_input: (handler: (value: string) => unknown): Record<string, unknown> => ({
+      onInput: (e: Event) => handler(((e.target as HTMLInputElement | null)?.value ?? '')),
+    }),
+  props_on_change: (handler: (value: string) => unknown): Record<string, unknown> => ({
+      onChange: (e: Event) => handler(((e.target as HTMLInputElement | null)?.value ?? '')),
+    }),
+  props_key: (key: string): Record<string, unknown> => ({ key }),
   props_merge: (left: unknown, right: unknown): Record<string, unknown> => {
-    const lhs = left && typeof left === 'object' ? (left as Record<string, unknown>) : {};
-    const rhs = right && typeof right === 'object' ? (right as Record<string, unknown>) : {};
-    return { ...lhs, ...rhs };
-  },
+      const lhs = left && typeof left === 'object' ? (left as Record<string, unknown>) : {};
+      const rhs = right && typeof right === 'object' ? (right as Record<string, unknown>) : {};
+      return { ...lhs, ...rhs };
+    },
   dom_get_element_by_id: (id: string): unknown => {
     const doc = (globalThis as { document?: { getElementById?: (value: string) => unknown } }).document;
     if (!doc || typeof doc.getElementById !== 'function') return null;
@@ -6657,6 +6703,15 @@ export const props_on_click_delta = (signal: Signal<number>, delta: number): Rec
   render.props_on_click_delta(signal, delta);
 export const props_on_click_inc = (signal: Signal<number>): Record<string, unknown> => render.props_on_click_inc(signal);
 export const props_on_click_dec = (signal: Signal<number>): Record<string, unknown> => render.props_on_click_dec(signal);
+export const props_id = (id: string): Record<string, unknown> => render.props_id(id);
+export const props_style = (style: string): Record<string, unknown> => render.props_style(style);
+export const props_value = (value: string): Record<string, unknown> => render.props_value(value);
+export const props_placeholder = (placeholder: string): Record<string, unknown> => render.props_placeholder(placeholder);
+export const props_href = (href: string): Record<string, unknown> => render.props_href(href);
+export const props_disabled = (disabled: boolean): Record<string, unknown> => render.props_disabled(disabled);
+export const props_on_input = (handler: (value: string) => unknown): Record<string, unknown> => render.props_on_input(handler);
+export const props_on_change = (handler: (value: string) => unknown): Record<string, unknown> => render.props_on_change(handler);
+export const props_key = (key: string): Record<string, unknown> => render.props_key(key);
 export const props_merge = (left: unknown, right: unknown): Record<string, unknown> => render.props_merge(left, right);
 export const dom_get_element_by_id = (id: string): unknown => render.dom_get_element_by_id(id);
 

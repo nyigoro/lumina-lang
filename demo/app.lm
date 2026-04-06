@@ -1,0 +1,48 @@
+import { text, vnode, props_class, props_on_click } from "@std/render";
+import { get, set } from "@std/reactive";
+import { div_node, button_node } from "./components.lm";
+import { home_view } from "./home.lm";
+import { lumina_view } from "./lumina-view.lm";
+import { playground_view } from "./playground.lm";
+
+fn nav_button_class(active: bool) -> string {
+  let active_class = "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white";
+  let inactive_class = "rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white";
+  if (active) {
+    return active_class;
+  }
+  return inactive_class;
+}
+
+fn route_click(route: Signal<string>, next: string) -> any {
+  return props_on_click(|| {
+    let _next = set(route, next);
+  });
+}
+
+fn current_view(route: Signal<string>, code: Signal<string>, output: Signal<string>, status: Signal<string>) -> VNode {
+  if (get(route) == "lumina") {
+    return lumina_view(code, output, status);
+  }
+  if (get(route) == "playground") {
+    return playground_view();
+  }
+  return home_view(route);
+}
+
+pub fn app(route: Signal<string>, code: Signal<string>, output: Signal<string>, status: Signal<string>) -> VNode {
+  let nav_class = "border-b border-gray-800 bg-gray-900 px-8 py-3";
+  let brand = vnode("span", props_class("text-lg font-bold text-white"), [text("Lumina")]);
+  let version = vnode("span", props_class("text-sm text-gray-500"), [text("v0.5.5")]);
+  let brand_row = div_node("flex items-center gap-2", [brand, version]);
+
+  let home_button = button_node(nav_button_class(get(route) == "home"), "Home", route_click(route, "home"));
+  let lumina_button = button_node(nav_button_class(get(route) == "lumina"), "Playground", route_click(route, "lumina"));
+  let parser_button = button_node(nav_button_class(get(route) == "playground"), "Parser", route_click(route, "playground"));
+  let nav_actions = div_node("flex gap-2", [home_button, lumina_button, parser_button]);
+  let nav_row = div_node("mx-auto flex max-w-6xl items-center justify-between", [brand_row, nav_actions]);
+  let nav = vnode("nav", props_class(nav_class), [nav_row]);
+
+  let body = current_view(route, code, output, status);
+  return div_node("min-h-screen bg-gray-950", [nav, body]);
+}

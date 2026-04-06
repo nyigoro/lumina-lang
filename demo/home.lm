@@ -1,0 +1,52 @@
+import { props_on_click } from "@std/render";
+import { set } from "@std/reactive";
+import { div_node, heading, subheading, paragraph, button_node, pre_block } from "./components.lm";
+
+fn route_click(route: Signal<string>, next: string) -> any {
+  return props_on_click(|| {
+    let _next = set(route, next);
+  });
+}
+
+pub fn home_view(route: Signal<string>) -> VNode {
+  let primary_class = "rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-500";
+  let secondary_class = "rounded-lg bg-gray-800 px-6 py-3 font-medium text-white hover:bg-gray-700";
+  let title = heading("Lumina");
+  let subtitle = paragraph(
+    "mt-4 text-xl text-gray-400",
+    "A web-native systems language with WASM-first execution"
+  );
+  let playground_button = button_node(
+    primary_class,
+    "Try Playground",
+    route_click(route, "lumina")
+  );
+  let parser_button = button_node(
+    secondary_class,
+    "Parser Studio",
+    route_click(route, "playground")
+  );
+  let actions = div_node("mt-8 flex gap-4", [playground_button, parser_button]);
+  let hero = div_node("py-16", [title, subtitle, actions]);
+
+  let quick_title = subheading("Quick Start");
+  let quick_code = pre_block(
+    "mt-4 overflow-x-auto rounded-xl border border-gray-800 bg-gray-900 p-4 text-sm text-green-400",
+    "fn main() -> void {\n  let msg = \"Hello, Lumina!\"\n  print(msg)\n}"
+  );
+  let quick = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [quick_title, quick_code]);
+
+  let runtime_title = subheading("Runtime");
+  let runtime_one = paragraph("mt-4 text-green-400", "Browser + WASM");
+  let runtime_two = paragraph("text-green-400", "Reactive UI");
+  let runtime_three = paragraph("text-green-400", "WebGPU, Workers, OPFS");
+  let runtime = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [
+    runtime_title,
+    runtime_one,
+    runtime_two,
+    runtime_three
+  ]);
+
+  let body = div_node("mx-auto flex max-w-5xl flex-col gap-8", [hero, quick, runtime]);
+  return div_node("min-h-screen bg-gray-950 p-8 text-white", [body]);
+}

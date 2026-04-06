@@ -773,6 +773,30 @@ export function createStdModuleRegistry(): ModuleRegistry {
         ),
       ],
       [
+        'call_global_1',
+        moduleFunction(
+          'call_global_1',
+          ['string', 'any'],
+          'any',
+          [primitive('string'), primitive('any')],
+          primitive('any'),
+          ['name', 'arg'],
+          'std://dom'
+        ),
+      ],
+      [
+        'call_global_1_string',
+        moduleFunction(
+          'call_global_1_string',
+          ['string', 'any'],
+          'string',
+          [primitive('string'), primitive('any')],
+          primitive('string'),
+          ['name', 'arg'],
+          'std://dom'
+        ),
+      ],
+      [
         'query_all',
         moduleFunction(
           'query_all',
@@ -4515,6 +4539,15 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const propsOnClickDeltaType: Type = fnType([adt('Signal', [primitive('int')]), primitive('int')], primitive('any'));
     const propsOnClickIncType: Type = fnType([adt('Signal', [primitive('int')])], primitive('any'));
     const propsOnClickDecType: Type = fnType([adt('Signal', [primitive('int')])], primitive('any'));
+    const propsIdType: Type = fnType([primitive('string')], primitive('any'));
+    const propsStyleType: Type = fnType([primitive('string')], primitive('any'));
+    const propsValueType: Type = fnType([primitive('string')], primitive('any'));
+    const propsPlaceholderType: Type = fnType([primitive('string')], primitive('any'));
+    const propsHrefType: Type = fnType([primitive('string')], primitive('any'));
+    const propsDisabledType: Type = fnType([primitive('bool')], primitive('any'));
+    const propsKeyType: Type = fnType([primitive('string')], primitive('any'));
+    const propsOnInputType: Type = fnType([fnType([primitive('string')], primitive('void'))], primitive('any'));
+    const propsOnChangeType: Type = fnType([fnType([primitive('string')], primitive('void'))], primitive('any'));
     const propsMergeType: Type = fnType([primitive('any'), primitive('any')], primitive('any'));
     const domGetElementByIdType: Type = fnType([primitive('string')], primitive('any'));
     const isVNodeType: Type = fnType([primitive('any')], primitive('bool'));
@@ -4780,6 +4813,105 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'any',
             schemeFromVars(propsOnClickDecType, []),
             ['signal'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_id',
+          moduleFunctionWithScheme(
+            'props_id',
+            ['string'],
+            'any',
+            schemeFromVars(propsIdType, []),
+            ['id'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_style',
+          moduleFunctionWithScheme(
+            'props_style',
+            ['string'],
+            'any',
+            schemeFromVars(propsStyleType, []),
+            ['style'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_value',
+          moduleFunctionWithScheme(
+            'props_value',
+            ['string'],
+            'any',
+            schemeFromVars(propsValueType, []),
+            ['value'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_placeholder',
+          moduleFunctionWithScheme(
+            'props_placeholder',
+            ['string'],
+            'any',
+            schemeFromVars(propsPlaceholderType, []),
+            ['placeholder'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_href',
+          moduleFunctionWithScheme(
+            'props_href',
+            ['string'],
+            'any',
+            schemeFromVars(propsHrefType, []),
+            ['href'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_disabled',
+          moduleFunctionWithScheme(
+            'props_disabled',
+            ['bool'],
+            'any',
+            schemeFromVars(propsDisabledType, []),
+            ['disabled'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_key',
+          moduleFunctionWithScheme(
+            'props_key',
+            ['string'],
+            'any',
+            schemeFromVars(propsKeyType, []),
+            ['key'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_on_input',
+          moduleFunctionWithScheme(
+            'props_on_input',
+            ['fn(string) -> void'],
+            'any',
+            schemeFromVars(propsOnInputType, []),
+            ['handler'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_on_change',
+          moduleFunctionWithScheme(
+            'props_on_change',
+            ['fn(string) -> void'],
+            'any',
+            schemeFromVars(propsOnChangeType, []),
+            ['handler'],
             'std://render'
           ),
         ],

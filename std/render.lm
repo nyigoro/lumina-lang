@@ -40,6 +40,42 @@ pub fn props_merge(left: any, right: any) -> any {
   render.props_merge(left, right)
 }
 
+pub fn props_id(id: string) -> any {
+  render.props_id(id)
+}
+
+pub fn props_style(style: string) -> any {
+  render.props_style(style)
+}
+
+pub fn props_value(value: string) -> any {
+  render.props_value(value)
+}
+
+pub fn props_placeholder(placeholder: string) -> any {
+  render.props_placeholder(placeholder)
+}
+
+pub fn props_href(href: string) -> any {
+  render.props_href(href)
+}
+
+pub fn props_disabled(disabled: bool) -> any {
+  render.props_disabled(disabled)
+}
+
+pub fn props_on_input(handler: fn(string) -> void) -> any {
+  render.props_on_input(handler)
+}
+
+pub fn props_on_change(handler: fn(string) -> void) -> any {
+  render.props_on_change(handler)
+}
+
+pub fn props_key(key: string) -> any {
+  render.props_key(key)
+}
+
 pub fn dom_get_element_by_id(id: string) -> any {
   render.dom_get_element_by_id(id)
 }

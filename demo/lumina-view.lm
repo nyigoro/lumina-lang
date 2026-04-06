@@ -1,0 +1,98 @@
+import {
+  vnode,
+  text,
+  props_class,
+  props_merge,
+  props_on_click,
+  props_on_input,
+  props_value
+} from "@std/render";
+import { dom } from "@std";
+import { get, set } from "@std/reactive";
+import { div_node, heading, subheading, paragraph, button_node, pre_block } from "./components.lm";
+
+fn status_class(status: string) -> string {
+  if (status == "ok") {
+    return "rounded-full bg-green-900 px-3 py-1 text-xs font-medium text-green-300";
+  }
+  if (status == "running") {
+    return "rounded-full bg-yellow-900 px-3 py-1 text-xs font-medium text-yellow-300";
+  }
+  return "rounded-full bg-gray-800 px-3 py-1 text-xs font-medium text-gray-300";
+}
+
+fn run_action(code: Signal<string>, output: Signal<string>, status: Signal<string>) -> any {
+  return props_on_click(|| {
+    let _running = set(status, "running");
+    let _output = set(output, dom.call_global_1_string("luminaCompileOutput", get(code)));
+    let _status = set(status, dom.call_global_1_string("luminaCompileStatus", get(code)));
+  });
+}
+
+fn code_input_action(code: Signal<string>) -> any {
+  return props_on_input(|value| {
+    let _updated = set(code, value);
+  });
+}
+
+fn hello_action(code: Signal<string>) -> any {
+  return props_on_click(|| {
+    let _updated = set(code, "fn main() -> i32 {\n  print(\"Hello, Lumina!\")\n  return 0\n}");
+  });
+}
+
+fn fib_action(code: Signal<string>) -> any {
+  return props_on_click(|| {
+    let _updated = set(code, "fn main() -> i32 {\n  return 55\n}");
+  });
+}
+
+pub fn lumina_view(code: Signal<string>, output: Signal<string>, status: Signal<string>) -> VNode {
+  let run_class = "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500";
+  let editor_class = "mt-4 h-80 w-full rounded-xl border border-gray-800 bg-gray-950 p-4 font-mono text-sm text-green-400 focus:border-blue-500 focus:outline-none";
+  let output_class = "mt-4 h-80 overflow-auto rounded-xl border border-gray-800 bg-gray-950 p-4 text-sm text-blue-300";
+  let preset_button_class = "rounded bg-gray-800 px-3 py-1 text-sm text-white hover:bg-gray-700";
+  let title = heading("Lumina Playground");
+  let status_badge = vnode("span", props_class(status_class(get(status))), [text(get(status))]);
+  let run_button = button_node(
+    run_class,
+    "Run",
+    run_action(code, output, status)
+  );
+  let header_right = div_node("flex items-center gap-3", [status_badge, run_button]);
+  let header = div_node("mb-6 flex items-center justify-between", [title, header_right]);
+
+  let source_title = subheading("Source");
+  let editor = vnode(
+    "textarea",
+    props_merge(
+      props_class(editor_class),
+      props_merge(props_value(get(code)), code_input_action(code))
+    ),
+    []
+  );
+  let source_panel = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [source_title, editor]);
+
+  let output_title = subheading("JS Output");
+  let output_block = pre_block(output_class, get(output));
+  let output_panel = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [output_title, output_block]);
+  let columns = div_node("grid grid-cols-1 gap-6 lg:grid-cols-2", [source_panel, output_panel]);
+
+  let presets_title = subheading("Presets");
+  let hello_button = button_node(
+    preset_button_class,
+    "Hello World",
+    hello_action(code)
+  );
+  let fib_button = button_node(
+    preset_button_class,
+    "Fibonacci",
+    fib_action(code)
+  );
+  let preset_row = div_node("mt-4 flex flex-wrap gap-2", [hello_button, fib_button]);
+  let preset_note = paragraph("mt-3 text-sm text-gray-400", "This route is now Lumina-rendered. Compiler execution wiring is next.");
+  let presets = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [presets_title, preset_row, preset_note]);
+
+  let body = div_node("mx-auto flex max-w-6xl flex-col gap-6", [header, columns, presets]);
+  return div_node("min-h-screen bg-gray-950 p-8 text-white", [body]);
+}

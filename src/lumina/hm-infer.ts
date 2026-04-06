@@ -1013,6 +1013,9 @@ function inferStatement(
     }
     case 'Return': {
       if (!currentReturn) return null;
+      const resolvedReturn = prune(currentReturn, subst);
+      const expectedReturnExpr =
+        resolvedReturn.kind === 'primitive' && resolvedReturn.name === 'void' ? undefined : currentReturn;
       const valueType = inferExpr(
         stmt.value,
         env,
@@ -1022,7 +1025,7 @@ function inferStatement(
         structRegistry,
         moduleBindings,
         inferredCalls,
-        currentReturn,
+        expectedReturnExpr,
         inAsync
       );
       if (!valueType) return null;
@@ -1848,11 +1851,19 @@ function inferExpr(
         const typeVar = freshTypeVar();
         typeParamMap.set(typeParam.name, typeVar);
       }
+      const contextualFunctionType =
+        expectedType && prune(expectedType, subst).kind === 'function'
+          ? (prune(expectedType, subst) as Type & { kind: 'function'; args: Type[]; returnType: Type })
+          : null;
+      const contextualArgs =
+        contextualFunctionType && contextualFunctionType.args.length === expr.params.length
+          ? contextualFunctionType.args
+          : null;
 
-      const paramTypes = expr.params.map((param) =>
+      const paramTypes = expr.params.map((param, index) =>
         param.typeName
           ? parseTypeNameWithEnv(param.typeName, typeParamMap)
-          : freshTypeVar()
+          : contextualArgs?.[index] ?? freshTypeVar()
       );
       paramTypes.forEach((paramType, index) => {
         const param = expr.params[index];
@@ -1861,31 +1872,63 @@ function inferExpr(
         }
       });
 
+      const contextualReturn =
+        contextualFunctionType && contextualFunctionType.args.length === expr.params.length
+          ? contextualFunctionType.returnType
+          : null;
+      const contextualReturnSeed =
+        contextualReturn && contextualReturn.kind !== 'variable' ? contextualReturn : null;
       const declaredReturn = expr.returnType
         ? parseTypeNameWithEnv(expr.returnType, typeParamMap)
-        : freshTypeVar();
+        : expr.async && contextualReturnSeed && contextualReturnSeed.kind === 'promise'
+          ? contextualReturnSeed.inner
+          : contextualReturnSeed ?? freshTypeVar();
       const prevReturn = activeReturnType;
       activeReturnType = declaredReturn;
       try {
-        for (const bodyStmt of expr.body.body) {
-          inferStatement(
-            bodyStmt,
-            lambdaEnv,
-            subst,
-            diagnostics,
-            declaredReturn,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            enumRegistry,
-            structRegistry,
-            undefined,
-            moduleBindings,
-            inferredCalls,
-            undefined,
-            inAsync || !!expr.async
-          );
+        const treatImplicitVoidReturnAsStatement =
+          !expr.returnType &&
+          contextualReturnSeed?.kind === 'primitive' &&
+          contextualReturnSeed.name === 'void' &&
+          expr.body.body.length === 1 &&
+          expr.body.body[0]?.type === 'Return';
+        if (treatImplicitVoidReturnAsStatement) {
+          const returnStmt = expr.body.body[0];
+          if (returnStmt.type === 'Return') {
+            inferExpr(
+              returnStmt.value,
+              lambdaEnv,
+              subst,
+              diagnostics,
+              enumRegistry,
+              structRegistry,
+              moduleBindings,
+              inferredCalls,
+              undefined,
+              inAsync || !!expr.async
+            );
+          }
+        } else {
+          for (const bodyStmt of expr.body.body) {
+            inferStatement(
+              bodyStmt,
+              lambdaEnv,
+              subst,
+              diagnostics,
+              declaredReturn,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              enumRegistry,
+              structRegistry,
+              undefined,
+              moduleBindings,
+              inferredCalls,
+              undefined,
+              inAsync || !!expr.async
+            );
+          }
         }
       } finally {
         activeReturnType = prevReturn;
@@ -3184,11 +3227,11 @@ function inferExpr(
             });
             return null;
           }
-          const argTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
+          const selectionArgTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
           const selected = selectModuleOverloadCandidate(
             `${expr.enumName}.${expr.callee.name}`,
             candidates,
-            argTypes,
+            selectionArgTypes,
             expr.location
           );
           if (!selected) return null;
@@ -3202,6 +3245,10 @@ function inferExpr(
             });
           }
           const calleeType = instantiate(selected.hmType);
+          const contextualArgTypes = calleeType.kind === 'function' ? calleeType.args : [];
+          const argTypes = rawArgValues.map(
+            (arg, index) => inferChild(arg, contextualArgTypes[index]) ?? contextualArgTypes[index] ?? freshTypeVar()
+          );
           const resultType = freshTypeVar();
           const fnType: Type = { kind: 'function', args: argTypes, returnType: resultType };
           tryUnify(calleeType, fnType, subst, diagnostics, {
@@ -3239,21 +3286,30 @@ function inferExpr(
         const directCandidates =
           directBinding ? resolveModuleFunctionCandidates(directBinding, undefined) : [];
         if (directCandidates.length > 0) {
-          const argTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
-          const selected = selectModuleOverloadCandidate(expr.callee.name, directCandidates, argTypes, expr.location);
+          const selectionArgTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
+          const selected = selectModuleOverloadCandidate(
+            expr.callee.name,
+            directCandidates,
+            selectionArgTypes,
+            expr.location
+          );
           if (!selected) return null;
-          if (selected.deprecatedMessage) {
-            diagnostics.push({
+        if (selected.deprecatedMessage) {
+          diagnostics.push({
               severity: 'warning',
               code: 'DEPRECATED',
               message: selected.deprecatedMessage,
               source: 'lumina',
               location: diagLocation(expr.location),
-            });
-          }
-          const calleeType = instantiate(selected.hmType);
-          const resultType = freshTypeVar();
-          const fnType: Type = { kind: 'function', args: argTypes, returnType: resultType };
+          });
+        }
+        const calleeType = instantiate(selected.hmType);
+        const contextualArgTypes = calleeType.kind === 'function' ? calleeType.args : [];
+        const argTypes = rawArgValues.map(
+          (arg, index) => inferChild(arg, contextualArgTypes[index]) ?? contextualArgTypes[index] ?? freshTypeVar()
+        );
+        const resultType = freshTypeVar();
+        const fnType: Type = { kind: 'function', args: argTypes, returnType: resultType };
           tryUnify(calleeType, fnType, subst, diagnostics, {
             location: expr.location,
             note: `In call to '${expr.callee.name}'`,
@@ -3284,7 +3340,10 @@ function inferExpr(
         });
       }
       const resolvedArgs = resolved ? resolved.args : rawArgValues;
-      const argTypes = resolvedArgs.map((arg) => (arg ? inferChild(arg) ?? freshTypeVar() : freshTypeVar()));
+      const contextualArgTypes = calleeType.kind === 'function' ? calleeType.args : [];
+      const argTypes = resolvedArgs.map((arg, index) =>
+        arg ? inferChild(arg, contextualArgTypes[index]) ?? contextualArgTypes[index] ?? freshTypeVar() : freshTypeVar()
+      );
       const resultType = freshTypeVar();
       const fnType: Type = { kind: 'function', args: argTypes, returnType: resultType };
       tryUnify(calleeType, fnType, subst, diagnostics, {

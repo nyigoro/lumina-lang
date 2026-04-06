@@ -1,0 +1,30 @@
+import {
+  vnode,
+  text,
+  props_class,
+  props_merge
+} from "@std/render";
+
+pub fn div_node(cls: string, children: any) -> VNode {
+  return vnode("div", props_class(cls), children);
+}
+
+pub fn heading(title: string) -> VNode {
+  return vnode("h1", props_class("text-4xl font-bold text-white"), [text(title)]);
+}
+
+pub fn subheading(title: string) -> VNode {
+  return vnode("h2", props_class("text-lg font-semibold text-white"), [text(title)]);
+}
+
+pub fn paragraph(cls: string, content: string) -> VNode {
+  return vnode("p", props_class(cls), [text(content)]);
+}
+
+pub fn button_node(cls: string, label: string, attrs: any) -> VNode {
+  return vnode("button", props_merge(props_class(cls), attrs), [text(label)]);
+}
+
+pub fn pre_block(cls: string, content: string) -> VNode {
+  return vnode("pre", props_class(cls), [text(content)]);
+}

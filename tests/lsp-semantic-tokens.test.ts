@@ -3,13 +3,20 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { compileGrammar } from '../src/grammar/index.js';
 import { ProjectContext } from '../src/project/context.js';
-import { buildSemanticTokensData, semanticTokenTypes } from '../src/lsp/semantic-tokens.js';
+import { buildSemanticTokensData, semanticTokenModifiers, semanticTokenTypes } from '../src/lsp/semantic-tokens.js';
 
 const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
 const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
 const parser = compileGrammar(luminaGrammar);
 
-type DecodedToken = { line: number; character: number; length: number; type: string; text: string };
+type DecodedToken = {
+  line: number;
+  character: number;
+  length: number;
+  type: string;
+  text: string;
+  modifiers: string[];
+};
 
 function offsetAt(text: string, line: number, character: number): number {
   const lines = text.split(/\r?\n/);
@@ -35,6 +42,7 @@ function decodeTokens(source: string, data: number[]): DecodedToken[] {
       length,
       type: semanticTokenTypes[typeIndex] ?? 'unknown',
       text,
+      modifiers: semanticTokenModifiers.filter((_, modifierIndex) => (data[i + 4] & (1 << modifierIndex)) !== 0),
     });
   }
   return out;
@@ -103,5 +111,17 @@ describe('LSP semantic tokens', () => {
       .map((token) => `${token.text}:${token.type}`);
 
     expect(tokensB).toEqual(tokensA);
+  });
+
+  test('marks builtin types as default library and macro calls as functions', () => {
+    const source = [
+      'fn demo() -> VNode {',
+      '  html!("<div />");',
+      '}',
+      '',
+    ].join('\n');
+    const tokens = decodeTokens(source, buildSemanticTokensData(source, []));
+    expect(tokens.some((token) => token.text === 'VNode' && token.type === 'type' && token.modifiers.includes('defaultLibrary'))).toBe(true);
+    expect(tokens.some((token) => token.text === 'html' && token.type === 'function' && token.modifiers.includes('declaration'))).toBe(true);
   });
 });

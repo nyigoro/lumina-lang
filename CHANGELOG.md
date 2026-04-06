@@ -4,7 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
- - **Tooling:** Added a compile-and-run Lumina REPL with persistent declaration context, history, `:load`/`:ctx`/`:clear` commands, and symbol-aware completion.
+- **Tooling:** Added a compile-and-run Lumina REPL with persistent declaration context, history, `:load`/`:ctx`/`:clear` commands, and symbol-aware completion.
+- **UI runtime:** Expanded `@std/render` prop helpers with DOM-friendly `id/style/value/placeholder/href/disabled/key` setters plus text-input `on_input`/`on_change` handlers for larger Lumina browser UIs.
 
 ## [0.5.3] - 2026-03-12
 

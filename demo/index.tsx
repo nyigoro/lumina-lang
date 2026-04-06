@@ -21,6 +21,8 @@ import {
   Copy
 } from 'lucide-react';
 import PEG from 'peggy';
+import './compiler-bridge';
+import './main.lm';
 import luminaGrammarRaw from '../src/grammar/lumina.peg?raw';
 import preludeRaw from '../std/prelude.lm?raw';
 import { BrowserProjectContext } from '../src/project/browser-context';
@@ -1229,5 +1231,3 @@ Expanded modules: fs/time/regex/crypto/channel/thread/sync`}</pre>
     </div>
   );
 }
-
-createRoot(document.getElementById('root')!).render(<App />);

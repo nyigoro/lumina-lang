@@ -7277,7 +7277,11 @@ function typeCheckExpr(
 
       scope?.read(callee, expr.location);
       const sym = symbols.get(callee) ?? options?.externSymbols?.(callee);
-      if (!sym || sym.kind !== 'function') {
+      const callableValueType =
+        sym?.kind === 'variable'
+          ? parseFunctionTypeName(sym.type ?? null)
+          : null;
+      if ((!sym || sym.kind !== 'function') && !callableValueType) {
         const enumVariant = findEnumVariant(symbols, callee, options);
         if (enumVariant) {
           const enumSym = symbols.get(enumVariant.enumName);
@@ -7391,6 +7395,43 @@ function typeCheckExpr(
         diagnostics.push(diagAt(`Unknown function '${callee}'`, expr.location, 'error', 'UNKNOWN_FUNCTION', related));
         return null;
       }
+      if (callableValueType) {
+        const effectiveArgCount = argValues.length + (pipedArgType ? 1 : 0);
+        if (callableValueType.params.length !== effectiveArgCount) {
+          diagnostics.push(diagAt(`Argument count mismatch for '${callee}'`, expr.location, 'error', 'LUM-002'));
+          return callableValueType.returnType;
+        }
+        for (let i = 0; i < effectiveArgCount; i++) {
+          const argType =
+            pipedArgType && i === 0
+              ? pipedArgType
+              : typeCheckExpr(
+                  argValues[pipedArgType ? i - 1 : i],
+                  symbols,
+                  diagnostics,
+                  scope,
+                  options,
+                  undefined,
+                  resolving,
+                  pendingDeps,
+                  currentFunction,
+                  di
+                );
+          const expected = callableValueType.params[i];
+          if (argType && !isTypeAssignable(argType, expected, symbols, options?.typeParams)) {
+            reportCallArgMismatch(
+              callee,
+              i,
+              expected,
+              argType,
+              argLocations[pipedArgType ? i - 1 : i] ?? expr.location,
+              null
+            );
+          }
+        }
+        return callableValueType.returnType;
+      }
+    if (!sym) return null;
     if (sym.uri && options?.currentUri && sym.uri !== options.currentUri && sym.visibility === 'private') {
       diagnostics.push(diagAt(`'${callee}' is private to ${sym.uri}`, expr.location));
       return null;
@@ -9732,6 +9773,42 @@ function parseTypeName(typeName: string): { base: string; args: string[] } | nul
   const inner = trimmed.slice(idx + 1, -1);
   const args = splitTypeArgs(inner);
   return { base, args };
+}
+
+function parseFunctionTypeName(typeName: LuminaType | null | undefined): { params: LuminaType[]; returnType: LuminaType } | null {
+  if (!typeName) return null;
+  const trimmed = typeName.trim();
+  if (trimmed.startsWith('Fn<') && trimmed.endsWith('>')) {
+    const parsed = parseTypeName(trimmed);
+    if (!parsed || parsed.base !== 'Fn' || parsed.args.length === 0) return null;
+    return {
+      params: parsed.args.slice(0, -1),
+      returnType: parsed.args[parsed.args.length - 1] ?? 'any',
+    };
+  }
+  if (!trimmed.startsWith('fn(')) return null;
+  let depth = 0;
+  let closeIdx = -1;
+  for (let i = 2; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === '(') {
+      depth += 1;
+    } else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) {
+        closeIdx = i;
+        break;
+      }
+    }
+  }
+  if (closeIdx < 0) return null;
+  const paramsText = trimmed.slice(3, closeIdx).trim();
+  const tail = trimmed.slice(closeIdx + 1).trim();
+  if (!tail.startsWith('->')) return null;
+  const returnType = tail.slice(2).trim();
+  if (!returnType) return null;
+  const params = paramsText.length > 0 ? splitTypeArgs(paramsText).map((param) => param.trim()) : [];
+  return { params, returnType };
 }
 
 function hmKey(location?: Location): string | null {

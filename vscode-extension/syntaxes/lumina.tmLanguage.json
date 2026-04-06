@@ -43,6 +43,11 @@
     "strings": {
       "patterns": [
         {
+          "name": "string.quoted.triple.lumina",
+          "begin": "\"\"\"",
+          "end": "\"\"\""
+        },
+        {
           "name": "string.quoted.double.lumina",
           "begin": "\"",
           "end": "\"",
@@ -64,14 +69,9 @@
           ]
         },
         {
-          "name": "string.quoted.triple.lumina",
-          "begin": "\"\"\"",
-          "end": "\"\"\""
-        },
-        {
           "name": "string.quoted.raw.lumina",
           "begin": "r\"",
-          "end": "\""
+          "end": "(?<!\\\\)\""
         }
       ]
     },
@@ -87,11 +87,11 @@
       "patterns": [
         {
           "name": "keyword.control.lumina",
-          "match": "\\b(?:if|else|match|while|for|return|await|async|move|is|as|try)\\b"
+          "match": "\\b(?:if|else|match|while|for|in|return|break|continue|await|async|move|is|as|try|compute|vertex|fragment)\\b"
         },
         {
           "name": "keyword.declaration.lumina",
-          "match": "\\b(?:fn|let|struct|enum|type|trait|impl|import|from|pub|extern|ref|mut)\\b"
+          "match": "\\b(?:fn|let|struct|enum|type|trait|impl|import|from|pub|extern|ref|mut|comptime|macro_rules|where|use|shader)\\b"
         },
         {
           "name": "constant.language.boolean.lumina",
@@ -103,7 +103,7 @@
       "patterns": [
         {
           "name": "storage.type.lumina",
-          "match": "\\b(?:int|float|bool|string|void|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f32|f64|Vec|HashMap|HashSet|Option|Result|Promise)\\b"
+          "match": "\\b(?:int|float|bool|string|void|any|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f32|f64|Vec|HashMap|HashSet|Option|Result|Promise|Signal|Memo|Effect|VNode|Renderer|ReactiveRenderRoot|Fn)\\b"
         }
       ]
     },
@@ -125,4 +125,3 @@
     }
   }
 }
-

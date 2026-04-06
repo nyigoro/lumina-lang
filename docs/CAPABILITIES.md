@@ -85,7 +85,7 @@ Last updated for v0.5.4.
 | Numeric API unification | Stable | Unified `abs`, `min`, `max`, `pow` over int/float overloads; `absf`/`minf`/`maxf`/`powf` remain as deprecated aliases |
 | HKT stdlib traits | Stable | `@std/functor`, `@std/applicative`, `@std/monad` + Option/Result/Vec/HashMap helpers |
 | Collection iteration + query helpers | Stable | `@std/iter` adds `filter/zip/enumerate/flatten/chunk/window/group_by/...`; `@std/query` adds eager `Query<T>` pipelines (`where_q`, `select_q`, `order_by_q`, `limit_q`, `join_q`) that compose with `|>` |
-| Frontend/reactivity primitives | Stable | `@std/reactive` + `@std/render` (`Signal`, `Memo`, `Effect`, `VNode`, renderer contract + DOM/SSR/Canvas/Terminal renderers) with hardening coverage for idempotent cleanup, stress batching, parity, and renderer error paths |
+| Frontend/reactivity primitives | Stable | `@std/reactive` + `@std/render` (`Signal`, `Memo`, `Effect`, `VNode`, renderer contract + DOM/SSR/Canvas/Terminal renderers) plus DOM-oriented prop helpers (`class/id/style/value/placeholder/href/disabled`, click/input/change handlers, prop merge/key) with hardening coverage for idempotent cleanup, stress batching, parity, and renderer error paths |
 | Runtime Option/Result | Stable | JS runtime + helpers |
 | Async I/O | Stable | `io.readLineAsync()` |
 | File system | Stable | `fs.readFile`, `fs.writeFile`, `fs.readDir`, `fs.metadata`, `fs.exists`, `fs.mkdir`, `fs.removeFile` |

@@ -148,4 +148,57 @@ describe('lambda expressions', () => {
     const errors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
     expect(errors).toHaveLength(0);
   });
+
+  it('treats fn-typed parameters as callable values', () => {
+    const source = `
+      fn apply(f: fn(string) -> void, val: string) -> void {
+        f(val);
+      }
+
+      fn sink(value: string) -> void {
+        let _copy = value;
+      }
+
+      fn main() -> void {
+        apply(fn(v: string) -> void { sink(v); }, "hello");
+      }
+    `.trim() + '\n';
+
+    const ast = parseProgram(source);
+    const analysis = analyzeLumina(ast);
+    const errors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('supports inferred single-arg callback lambdas for props_on_input', () => {
+    const source = `
+      import { render, reactive } from "@std";
+
+      fn main() -> any {
+        let code = reactive.createSignal("hello");
+        render.props_on_input(|v| reactive.set(code, v))
+      }
+    `.trim() + '\n';
+
+    const ast = parseProgram(source);
+    const inferred = inferProgram(ast as never);
+    const errors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('supports inferred zero-arg callback lambdas for props_on_click', () => {
+    const source = `
+      import { render, reactive } from "@std";
+
+      fn main() -> any {
+        let status = reactive.createSignal("idle");
+        render.props_on_click(|| reactive.set(status, "running"))
+      }
+    `.trim() + '\n';
+
+    const ast = parseProgram(source);
+    const inferred = inferProgram(ast as never);
+    const errors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(errors).toHaveLength(0);
+  });
 });
