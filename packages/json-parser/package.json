@@ -16,5 +16,5 @@
   ],
   "keywords": ["lumina", "json", "parser"],
   "author": "Lumina Contributors",
-  "license": "MIT"
+  "license": "MIT OR Apache-2.0"
 }

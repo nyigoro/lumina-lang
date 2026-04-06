@@ -17,7 +17,7 @@
   ],
   "keywords": ["lumina", "github", "api", "http"],
   "author": "Lumina Contributors",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "dependencies": {
     "lumina-http": "^0.5.3",
     "lumina-json-parser": "^0.5.3"

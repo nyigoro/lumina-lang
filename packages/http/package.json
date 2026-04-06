@@ -15,5 +15,5 @@
   ],
   "keywords": ["lumina", "http", "fetch", "client"],
   "author": "Lumina Contributors",
-  "license": "MIT"
+  "license": "MIT OR Apache-2.0"
 }
