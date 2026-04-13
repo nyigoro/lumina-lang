@@ -1603,6 +1603,200 @@ const createDomStubElement = (): {
   };
 };
 
+type RouterLocationLike = {
+  pathname?: string;
+  hash?: string;
+  search?: string;
+};
+
+type RouterHistoryLike = {
+  pushState?: (data: unknown, unused: string, url?: string | URL | null) => void;
+  replaceState?: (data: unknown, unused: string, url?: string | URL | null) => void;
+  state?: unknown;
+};
+
+type RouterWindowLike = {
+  addEventListener?: (type: string, listener: EventListener) => void;
+  removeEventListener?: (type: string, listener: EventListener) => void;
+  dispatchEvent?: (event: Event) => boolean;
+  location?: RouterLocationLike;
+  history?: RouterHistoryLike;
+};
+
+type RouterDocumentLike = {
+  baseURI?: string;
+};
+
+type RouterPopStateHandler = (path: string) => unknown;
+
+const routerPopStateHandlers = new Map<RouterPopStateHandler, EventListener>();
+
+const getRouterWindowHandle = (): RouterWindowLike | null => {
+  const windowHandle = (globalThis as { window?: RouterWindowLike }).window;
+  if (windowHandle && typeof windowHandle === 'object') return windowHandle;
+  const globalHandle = globalThis as RouterWindowLike;
+  if (
+    typeof globalHandle.addEventListener === 'function' ||
+    typeof globalHandle.dispatchEvent === 'function' ||
+    typeof globalHandle.location === 'object'
+  ) {
+    return globalHandle;
+  }
+  return null;
+};
+
+const getRouterLocationHandle = (): RouterLocationLike | null => {
+  const windowHandle = getRouterWindowHandle();
+  if (windowHandle?.location) return windowHandle.location;
+  const locationHandle = (globalThis as { location?: RouterLocationLike }).location;
+  return locationHandle && typeof locationHandle === 'object' ? locationHandle : null;
+};
+
+const getRouterHistoryHandle = (): RouterHistoryLike | null => {
+  const windowHandle = getRouterWindowHandle();
+  if (windowHandle?.history) return windowHandle.history;
+  const historyHandle = (globalThis as { history?: RouterHistoryLike }).history;
+  return historyHandle && typeof historyHandle === 'object' ? historyHandle : null;
+};
+
+const readRouterPathname = (): string => String(getRouterLocationHandle()?.pathname ?? '/');
+const readRouterHash = (): string => String(getRouterLocationHandle()?.hash ?? '');
+const readRouterSearch = (): string => String(getRouterLocationHandle()?.search ?? '');
+
+const trimRouterTrailingSlash = (value: string): string => {
+  if (value.length <= 1) return value || '/';
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+};
+
+const normalizeRouterPath = (value: string): string => {
+  const text = String(value || '/');
+  const withLeadingSlash = text.startsWith('/') ? text : `/${text}`;
+  return trimRouterTrailingSlash(withLeadingSlash);
+};
+
+const splitRouterSegments = (value: string): string[] =>
+  normalizeRouterPath(value)
+    .split('/')
+    .filter((segment) => segment.length > 0);
+
+const createRouterParamMap = (entries: Array<[string, string]>): HashMap<string, string> => {
+  const out = HashMap.new<string, string>();
+  for (const [key, value] of entries) {
+    if (key.length > 0) out.insert(key, value);
+  }
+  return out;
+};
+
+const matchRouterPattern = (pattern: string, path: string): boolean => {
+  if (pattern === '*') return true;
+  const patternSegments = splitRouterSegments(pattern);
+  const pathSegments = splitRouterSegments(path);
+  if (patternSegments.length !== pathSegments.length) return false;
+  for (let i = 0; i < patternSegments.length; i += 1) {
+    const expected = patternSegments[i] ?? '';
+    const actual = pathSegments[i] ?? '';
+    if (expected.startsWith(':')) continue;
+    if (expected !== actual) return false;
+  }
+  return true;
+};
+
+const extractRouterParams = (pattern: string, path: string): HashMap<string, string> => {
+  if (pattern === '*') return HashMap.new<string, string>();
+  const patternSegments = splitRouterSegments(pattern);
+  const pathSegments = splitRouterSegments(path);
+  if (patternSegments.length !== pathSegments.length) return HashMap.new<string, string>();
+  const entries: Array<[string, string]> = [];
+  for (let i = 0; i < patternSegments.length; i += 1) {
+    const expected = patternSegments[i] ?? '';
+    if (!expected.startsWith(':')) continue;
+    entries.push([expected.slice(1), pathSegments[i] ?? '']);
+  }
+  return createRouterParamMap(entries);
+};
+
+const parseRouterSearchParams = (search: string): HashMap<string, string> => {
+  const text = String(search ?? '');
+  const body = text.startsWith('?') ? text.slice(1) : text;
+  if (body.length === 0) return HashMap.new<string, string>();
+  const entries: Array<[string, string]> = [];
+  for (const pair of body.split('&')) {
+    if (!pair) continue;
+    const [rawKey, rawValue = ''] = pair.split('=');
+    if (!rawKey) continue;
+    entries.push([rawKey, rawValue]);
+  }
+  return createRouterParamMap(entries);
+};
+
+const updateRouterLocationValue = (nextPath: string): void => {
+  const locationHandle = getRouterLocationHandle();
+  if (!locationHandle) return;
+  try {
+    const normalized = String(nextPath);
+    locationHandle.pathname = normalized;
+    locationHandle.hash = '';
+    locationHandle.search = '';
+  } catch {
+    // Ignore host stubs with read-only location fields.
+  }
+};
+
+const createRouterPopStateEvent = (): Event => {
+  try {
+    const PopStateEventCtor = (globalThis as { PopStateEvent?: typeof PopStateEvent }).PopStateEvent;
+    if (typeof PopStateEventCtor === 'function') {
+      return new PopStateEventCtor('popstate', { state: getRouterHistoryHandle()?.state });
+    }
+  } catch {
+    // Fall through to generic Event.
+  }
+  try {
+    const EventCtor = (globalThis as { Event?: typeof Event }).Event;
+    if (typeof EventCtor === 'function') {
+      return new EventCtor('popstate');
+    }
+  } catch {
+    // Fall through to plain object shim.
+  }
+  return { type: 'popstate' } as Event;
+};
+
+const dispatchRouterPopState = (): void => {
+  const windowHandle = getRouterWindowHandle();
+  if (windowHandle && typeof windowHandle.dispatchEvent === 'function') {
+    try {
+      windowHandle.dispatchEvent(createRouterPopStateEvent());
+      return;
+    } catch {
+      // Fall back to direct handler invocation below.
+    }
+  }
+  const path = readRouterPathname();
+  for (const handler of routerPopStateHandlers.keys()) {
+    try {
+      handler(path);
+    } catch {
+      // Keep browser bridge listeners resilient.
+    }
+  }
+};
+
+const readRouterBasePath = (): string => {
+  const documentHandle = (globalThis as { document?: RouterDocumentLike }).document;
+  const baseURI = typeof documentHandle?.baseURI === "string" ? documentHandle.baseURI : "";
+  if (!baseURI) return '/';
+  try {
+    if (typeof URL === 'function') {
+      const parsed = new URL(baseURI, 'http://lumina.local');
+      return parsed.pathname || '/';
+    }
+  } catch {
+    // Fall through to returning the raw base URI string.
+  }
+  return baseURI;
+};
+
 export const dom = {
   is_available: (): boolean => getDocumentHandle() !== null,
   call_global_1: (name: string, arg: unknown): unknown => {
@@ -1743,6 +1937,71 @@ export const dom = {
     if (!element || !element.style) return;
     element.style[String(prop)] = String(value);
   },
+};
+
+export const router = {
+  getCurrentPath: (): string => readRouterPathname(),
+  getCurrentHash: (): string => readRouterHash(),
+  getCurrentSearch: (): string => readRouterSearch(),
+  matchRoute: (pattern: string, path: string): boolean => matchRouterPattern(pattern, path),
+  extractParams: (pattern: string, path: string): HashMap<string, string> =>
+    extractRouterParams(pattern, path),
+  parseSearchParams: (search: string): HashMap<string, string> => parseRouterSearchParams(search),
+  push: (path: string): void => {
+    const normalized = String(path);
+    const historyHandle = getRouterHistoryHandle();
+    if (historyHandle && typeof historyHandle.pushState === 'function') {
+      try {
+        historyHandle.pushState(historyHandle.state ?? null, '', normalized);
+      } catch {
+        updateRouterLocationValue(normalized);
+      }
+    } else {
+      updateRouterLocationValue(normalized);
+    }
+    dispatchRouterPopState();
+  },
+  replace: (path: string): void => {
+    const normalized = String(path);
+    const historyHandle = getRouterHistoryHandle();
+    if (historyHandle && typeof historyHandle.replaceState === 'function') {
+      try {
+        historyHandle.replaceState(historyHandle.state ?? null, '', normalized);
+      } catch {
+        updateRouterLocationValue(normalized);
+      }
+    } else {
+      updateRouterLocationValue(normalized);
+    }
+    dispatchRouterPopState();
+  },
+  onPopState: (handler: RouterPopStateHandler | null | undefined): void => {
+    if (typeof handler !== 'function') return;
+    router.offPopState(handler);
+    const listener: EventListener = () => {
+      try {
+        handler(readRouterPathname());
+      } catch {
+        // Ignore user callback failures in browser bridge.
+      }
+    };
+    routerPopStateHandlers.set(handler, listener);
+    const windowHandle = getRouterWindowHandle();
+    if (windowHandle && typeof windowHandle.addEventListener === 'function') {
+      windowHandle.addEventListener('popstate', listener);
+    }
+  },
+  offPopState: (handler: RouterPopStateHandler | null | undefined): void => {
+    if (typeof handler !== 'function') return;
+    const listener = routerPopStateHandlers.get(handler);
+    if (!listener) return;
+    const windowHandle = getRouterWindowHandle();
+    if (windowHandle && typeof windowHandle.removeEventListener === 'function') {
+      windowHandle.removeEventListener('popstate', listener);
+    }
+    routerPopStateHandlers.delete(handler);
+  },
+  getBasePath: (): string => readRouterBasePath(),
 };
 
 export const env = {
@@ -6541,7 +6800,14 @@ export const render = {
   props_empty: (): Record<string, unknown> => ({}),
   props_class: (className: string): Record<string, unknown> => ({ className }),
   props_on_click: (handler: (() => unknown) | null | undefined): Record<string, unknown> => ({
-    onClick: typeof handler === 'function' ? handler : () => undefined,
+    onClick: (event?: Event) => {
+      if (typeof handler !== 'function') return undefined;
+      const outcome = handler();
+      if (outcome === false && event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      return outcome;
+    },
   }),
   props_on_click_delta: (signal: Signal<number>, delta: number): Record<string, unknown> => ({
     onClick: () => {
@@ -6721,6 +6987,7 @@ export const reactive = {
   set,
   createMemo,
   createEffect,
+  disposeEffect: render.dispose_effect,
   updateSignal: render.update_signal,
   batch: render.batch,
   untrack: render.untrack,

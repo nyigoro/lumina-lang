@@ -1,15 +1,25 @@
-import { div_node, heading, paragraph, pre_block } from "./components.lm";
+import {
+  vnode,
+  text,
+  props_class
+} from "@std/render";
+import { div_node, heading, subheading, paragraph, pre_block } from "./components.lm";
 
 pub fn playground_view() -> VNode {
   let title = heading("Parser Studio");
   let subtitle = paragraph(
     "mt-4 text-lg text-gray-400",
-    "This route is being migrated from the React demo into Lumina."
+    "This playground is being prepared. Use the React demo version for full parser studio features."
   );
-  let sample = pre_block(
-    "mt-6 overflow-x-auto rounded-xl border border-gray-800 bg-gray-900 p-4 text-sm text-blue-300",
-    "Expression = left:Term _ operator:(\"+\" / \"-\") _ right:Expression"
-  );
-  let body = div_node("mx-auto max-w-5xl", [title, subtitle, sample]);
+
+  let info_box = vnode("div", props_class("rounded-lg border border-gray-700 bg-gray-900 p-6 space-y-4"), [
+    subheading("Features Coming Soon"),
+    paragraph("text-sm text-gray- 300", "Grammar editor with PEG syntax support"),
+    paragraph("text-sm text-gray-300", "Test input parser and AST visualization"),
+    paragraph("text-sm text-gray-300", "Performance metrics and parse history"),
+    paragraph("text-sm text-gray-300", "Import/export parser sessions")
+  ]);
+
+  let body = div_node("mx-auto max-w-5xl space-y-6", [title, subtitle, info_box]);
   return div_node("min-h-screen bg-gray-950 p-8 text-white", [body]);
 }

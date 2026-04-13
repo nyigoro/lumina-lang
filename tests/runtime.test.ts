@@ -1,9 +1,11 @@
 import { formatValue, Option, Result, LuminaPanic, io } from '../src/lumina-runtime.js';
 
+const renderPlain = (value: unknown): string => formatValue(value, { color: false });
+
 describe('Lumina runtime', () => {
   test('pretty-prints nested ADTs', () => {
     const value = Option.Some(Result.Ok([1, 2, 3]));
-    const rendered = formatValue(value);
+    const rendered = renderPlain(value);
     expect(rendered).toContain('Some');
     expect(rendered).toContain('Ok');
     expect(rendered).toContain('1');
@@ -14,24 +16,24 @@ describe('Lumina runtime', () => {
   test('cycle-safe formatting', () => {
     const obj: { self?: unknown } = {};
     obj.self = obj;
-    const rendered = formatValue(obj);
+    const rendered = renderPlain(obj);
     expect(rendered).toContain('[Circular]');
   });
 
   test('Option helpers', () => {
     const some = Option.Some(5);
     const mapped = Option.map((x: unknown) => (x as number) * 2, some);
-    expect(formatValue(mapped)).toContain('Some(10)');
+    expect(renderPlain(mapped)).toContain('Some(10)');
 
     const none = Option.None;
     const mappedNone = Option.map((x: unknown) => x, none);
-    expect(formatValue(mappedNone)).toContain('None');
+    expect(renderPlain(mappedNone)).toContain('None');
 
     const chained = Option.and_then((x: unknown) => Option.Some((x as number) + 1), some);
-    expect(formatValue(chained)).toContain('Some(6)');
+    expect(renderPlain(chained)).toContain('Some(6)');
 
     const fallback = Option.or_else(() => Option.Some(99), none);
-    expect(formatValue(fallback)).toContain('Some(99)');
+    expect(renderPlain(fallback)).toContain('Some(99)');
 
     expect(Option.unwrap_or(0, some)).toBe(5);
     expect(Option.unwrap_or(0, none)).toBe(0);
@@ -52,17 +54,17 @@ describe('Lumina runtime', () => {
   test('Result helpers', () => {
     const ok = Result.Ok(5);
     const mapped = Result.map((x: unknown) => (x as number) * 2, ok);
-    expect(formatValue(mapped)).toContain('Ok(10)');
+    expect(renderPlain(mapped)).toContain('Ok(10)');
 
     const chained = Result.and_then((x: unknown) => Result.Ok((x as number) + 1), ok);
-    expect(formatValue(chained)).toContain('Ok(6)');
+    expect(renderPlain(chained)).toContain('Ok(6)');
 
     const err = Result.Err('bad');
     const errMapped = Result.map((x: unknown) => x, err);
-    expect(formatValue(errMapped)).toContain('Err');
+    expect(renderPlain(errMapped)).toContain('Err');
 
     const recovered = Result.or_else((msg: unknown) => Result.Ok(String(msg).length), err);
-    expect(formatValue(recovered)).toContain('Ok(');
+    expect(renderPlain(recovered)).toContain('Ok(');
 
     expect(Result.is_ok(ok)).toBe(true);
     expect(Result.is_ok(err)).toBe(false);

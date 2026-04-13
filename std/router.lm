@@ -1,0 +1,135 @@
+import { router, reactive, render, str } from "@std"
+
+pub struct Router {
+  path: Signal<string>,
+  base: string
+}
+
+fn starts_with(value: string, prefix: string) -> bool {
+  if (str.length(prefix) > str.length(value)) {
+    return false
+  }
+  return str.substring(value, 0, str.length(prefix)) == prefix
+}
+
+fn char_at_or_empty(value: string, index: int) -> string {
+  if (index < 0) {
+    return ""
+  }
+  if (index >= str.length(value)) {
+    return ""
+  }
+  return str.substring(value, index, index + 1)
+}
+
+fn ensure_leading_slash(value: string) -> string {
+  if (str.length(value) == 0) {
+    return "/"
+  }
+  if (char_at_or_empty(value, 0) == "/") {
+    return value
+  }
+  return str.concat("/", value)
+}
+
+fn trim_trailing_slash(value: string) -> string {
+  if (str.length(value) <= 1) {
+    return value
+  }
+  if (char_at_or_empty(value, str.length(value) - 1) == "/") {
+    return str.substring(value, 0, str.length(value) - 1)
+  }
+  return value
+}
+
+fn normalize_path(value: string) -> string {
+  return trim_trailing_slash(ensure_leading_slash(value))
+}
+
+fn normalize_base(base: string) -> string {
+  if (str.length(base) == 0) {
+    return "/"
+  }
+  return trim_trailing_slash(ensure_leading_slash(base))
+}
+
+fn strip_base_path(path: string, base: string) -> string {
+  let normalized_path = normalize_path(path)
+  let normalized_base = normalize_base(base)
+  if (normalized_base == "/") {
+    return normalized_path
+  }
+  if (normalized_path == normalized_base) {
+    return "/"
+  }
+  let prefix = str.concat(normalized_base, "/")
+  if (starts_with(normalized_path, prefix)) {
+    return normalize_path(str.substring(normalized_path, str.length(normalized_base), str.length(normalized_path)))
+  }
+  return normalized_path
+}
+
+fn resolve_href(base: string, path: string) -> string {
+  let normalized_path = normalize_path(path)
+  let normalized_base = normalize_base(base)
+  if (normalized_base == "/") {
+    return normalized_path
+  }
+  if (normalized_path == "/") {
+    return normalized_base
+  }
+  return str.concat(normalized_base, normalized_path)
+}
+
+pub fn createRouter(base: string) -> Router {
+  let normalized_base = normalize_base(base)
+  let path_signal = reactive.createSignal(strip_base_path(router.getCurrentPath(), normalized_base))
+  router.onPopState(fn(pathname: string) -> void {
+    let _synced = reactive.set(path_signal, strip_base_path(normalize_path(pathname), normalized_base))
+  })
+  return Router { path: path_signal, base: normalized_base }
+}
+
+pub fn navigate(routerValue: Router, path: string) -> void {
+  router.push(resolve_href(routerValue.base, path))
+}
+
+pub fn replace(routerValue: Router, path: string) -> void {
+  router.replace(resolve_href(routerValue.base, path))
+}
+
+pub fn currentPath(routerValue: Router) -> Signal<string> {
+  return routerValue.path
+}
+
+pub fn currentParams(_routerValue: Router) -> any {
+  return router.parseSearchParams(router.getCurrentSearch())
+}
+
+pub fn matchRoute(pattern: string, path: string) -> bool {
+  return router.matchRoute(pattern, path)
+}
+
+pub fn extractParams(pattern: string, path: string) -> any {
+  return router.extractParams(pattern, path)
+}
+
+pub fn onRouteChange(routerValue: Router, handler: fn(string) -> void) -> Effect {
+  return reactive.createEffect(fn() -> void {
+    handler(reactive.get(routerValue.path))
+  })
+}
+
+pub fn link(routerValue: Router, href: string, label: string) -> VNode {
+  let attrs = render.props_merge(
+    render.props_class("inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-gray-400 transition-colors hover:text-white"),
+    render.props_merge(
+      render.props_href(resolve_href(routerValue.base, href)),
+      render.props_on_click(fn() -> bool {
+        navigate(routerValue, href)
+        return false
+      })
+    )
+  )
+  return render.element("a", attrs, [render.text(label)])
+}

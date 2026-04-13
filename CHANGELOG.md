@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Routing/UI:** Added `@std/router` with browser-history-aware navigation, current-path/search helpers, route matching/param extraction, and declarative link support for Lumina browser apps.
+- **Demo:** Migrated the Lumina-authored browser demo from an internal route signal to URL-aware routing with back/forward browser navigation support.
+
 ## [0.5.7] - 2026-04-06
 
 - **Tooling:** Added a compile-and-run Lumina REPL with persistent declaration context, history, `:load`/`:ctx`/`:clear` commands, and symbol-aware completion.

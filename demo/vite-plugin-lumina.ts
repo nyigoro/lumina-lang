@@ -12,6 +12,7 @@ type CompilerModule = {
 };
 
 const importStatementRegex = /^\s*import\s+.+?from\s+["']([^"']+)["'];?\s*$/gm;
+const sourceBackedStdModules = new Set(['router']);
 
 const normalizeSpecifier = (fromDir: string, toFile: string): string => {
   let relativePath = path.relative(fromDir, toFile).replace(/\\/g, '/');
@@ -42,13 +43,31 @@ const appendExports = (code: string, names: string[]): string => {
   return `${code.trimEnd()}\nexport { ${Array.from(new Set(names)).join(', ')} };\n`;
 };
 
-const collectLocalImportStatements = (source: string): string[] => {
+const resolveLuminaImportSpecifier = (fromFile: string, spec: string): string | null => {
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    return spec;
+  }
+  if (spec.startsWith('@std/')) {
+    const moduleName = spec.slice('@std/'.length);
+    if (!sourceBackedStdModules.has(moduleName)) {
+      return null;
+    }
+    const stdlibPath = path.join(path.resolve(__dirname, '..'), 'std', `${moduleName}.lm`);
+    if (fs.existsSync(stdlibPath)) {
+      return normalizeSpecifier(path.dirname(fromFile), stdlibPath);
+    }
+  }
+  return null;
+};
+
+const collectResolvedImportStatements = (source: string, fromFile: string): string[] => {
   const statements: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = importStatementRegex.exec(source)) !== null) {
     const spec = match[1];
-    if (spec.startsWith('./') || spec.startsWith('../')) {
-      statements.push(match[0].trim());
+    const resolved = resolveLuminaImportSpecifier(fromFile, spec);
+    if (resolved) {
+      statements.push(match[0].replace(spec, resolved).trim());
     }
   }
   return statements;
@@ -95,9 +114,9 @@ export function luminaPlugin(): Plugin {
     });
     const runtimeSpecifier = normalizeSpecifier(path.dirname(id), runtimePath);
     const rewritten = generated.code.replace(/from\s+["']\.\/lumina-runtime\.js["']/g, `from ${JSON.stringify(runtimeSpecifier)}`);
-    const localImports = collectLocalImportStatements(source);
-    const withLocalImports = localImports.length > 0 ? `${localImports.join('\n')}\n${rewritten}` : rewritten;
-    return appendExports(withLocalImports, collectPublicExports(source));
+    const resolvedImports = collectResolvedImportStatements(source, id);
+    const withResolvedImports = resolvedImports.length > 0 ? `${resolvedImports.join('\n')}\n${rewritten}` : rewritten;
+    return appendExports(withResolvedImports, collectPublicExports(source));
   };
 
   return {

@@ -1,14 +1,14 @@
 import { props_on_click } from "@std/render";
-import { set } from "@std/reactive";
+import { navigate, Router } from "@std/router";
 import { div_node, heading, subheading, paragraph, button_node, pre_block } from "./components.lm";
 
-fn route_click(route: Signal<string>, next: string) -> any {
+fn route_click(routerValue: Router, next: string) -> any {
   return props_on_click(|| {
-    let _next = set(route, next);
+    navigate(routerValue, next)
   });
 }
 
-pub fn home_view(route: Signal<string>) -> VNode {
+pub fn home_view(routerValue: Router) -> VNode {
   let primary_class = "rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-500";
   let secondary_class = "rounded-lg bg-gray-800 px-6 py-3 font-medium text-white hover:bg-gray-700";
   let title = heading("Lumina");
@@ -19,12 +19,12 @@ pub fn home_view(route: Signal<string>) -> VNode {
   let playground_button = button_node(
     primary_class,
     "Try Playground",
-    route_click(route, "lumina")
+    route_click(routerValue, "/lumina")
   );
   let parser_button = button_node(
     secondary_class,
     "Parser Studio",
-    route_click(route, "playground")
+    route_click(routerValue, "/playground")
   );
   let actions = div_node("mt-8 flex gap-4", [playground_button, parser_button]);
   let hero = div_node("py-16", [title, subtitle, actions]);

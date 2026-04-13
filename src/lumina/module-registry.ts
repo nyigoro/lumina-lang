@@ -979,6 +979,146 @@ export function createStdModuleRegistry(): ModuleRegistry {
     ]),
   };
 
+  const routerModule: ModuleNamespace = {
+    kind: 'module',
+    name: 'router',
+    moduleId: 'std://router-runtime',
+    exports: new Map<string, ModuleExport>([
+      [
+        'getCurrentPath',
+        moduleFunction(
+          'getCurrentPath',
+          [],
+          'string',
+          [],
+          primitive('string'),
+          [],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'getCurrentHash',
+        moduleFunction(
+          'getCurrentHash',
+          [],
+          'string',
+          [],
+          primitive('string'),
+          [],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'getCurrentSearch',
+        moduleFunction(
+          'getCurrentSearch',
+          [],
+          'string',
+          [],
+          primitive('string'),
+          [],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'matchRoute',
+        moduleFunction(
+          'matchRoute',
+          ['string', 'string'],
+          'bool',
+          [primitive('string'), primitive('string')],
+          primitive('bool'),
+          ['pattern', 'path'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'extractParams',
+        moduleFunction(
+          'extractParams',
+          ['string', 'string'],
+          'any',
+          [primitive('string'), primitive('string')],
+          primitive('any'),
+          ['pattern', 'path'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'parseSearchParams',
+        moduleFunction(
+          'parseSearchParams',
+          ['string'],
+          'any',
+          [primitive('string')],
+          primitive('any'),
+          ['search'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'push',
+        moduleFunction(
+          'push',
+          ['string'],
+          'void',
+          [primitive('string')],
+          primitive('void'),
+          ['path'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'replace',
+        moduleFunction(
+          'replace',
+          ['string'],
+          'void',
+          [primitive('string')],
+          primitive('void'),
+          ['path'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'onPopState',
+        moduleFunction(
+          'onPopState',
+          ['fn(string) -> void'],
+          'void',
+          [fnType([primitive('string')], primitive('void'))],
+          primitive('void'),
+          ['handler'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'offPopState',
+        moduleFunction(
+          'offPopState',
+          ['fn(string) -> void'],
+          'void',
+          [fnType([primitive('string')], primitive('void'))],
+          primitive('void'),
+          ['handler'],
+          'std://router-runtime'
+        ),
+      ],
+      [
+        'getBasePath',
+        moduleFunction(
+          'getBasePath',
+          [],
+          'string',
+          [],
+          primitive('string'),
+          [],
+          'std://router-runtime'
+        ),
+      ],
+    ]),
+  };
+
   const webWorkerModule: ModuleNamespace = {
     kind: 'module',
     name: 'web_worker',
@@ -6375,6 +6515,7 @@ export function createStdModuleRegistry(): ModuleRegistry {
       ['fs', fsModule],
       ['opfs', opfsModule],
       ['url', urlModule],
+      ['router', routerModule],
       ['web_storage', webStorageModule],
       ['dom', domModule],
       ['web_worker', webWorkerModule],
@@ -6398,6 +6539,7 @@ export function createStdModuleRegistry(): ModuleRegistry {
   registry.set('@std/fs', fsModule);
   registry.set('@std/opfs', opfsModule);
   registry.set('@std/url', urlModule);
+  registry.set('@std/router', routerModule);
   registry.set('@std/web_storage', webStorageModule);
   registry.set('@std/dom', domModule);
   registry.set('@std/web_worker', webWorkerModule);
