@@ -90,7 +90,7 @@ pub fn lumina_view(code: Signal<string>, output: Signal<string>, status: Signal<
     fib_action(code)
   );
   let preset_row = div_node("mt-4 flex flex-wrap gap-2", [hello_button, fib_button]);
-  let preset_note = paragraph("mt-3 text-sm text-gray-400", "This route is now Lumina-rendered. Compiler execution wiring is next.");
+  let preset_note = paragraph("mt-3 text-sm text-gray-400", "This route is Lumina-rendered and runs the in-browser compiler bridge for quick feedback.");
   let presets = div_node("rounded-xl border border-gray-800 bg-gray-900 p-6", [presets_title, preset_row, preset_note]);
 
   let body = div_node("mx-auto flex max-w-6xl flex-col gap-6", [header, columns, presets]);

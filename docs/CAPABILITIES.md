@@ -1,7 +1,7 @@
 # Lumina Capabilities Matrix
 
 This document tracks the current state of the Lumina language/tooling and near‑term priorities.
-Last updated for v0.5.4.
+Last updated for v0.5.7.
 
 ## Strategic Focus
 - **Primary identity**: Web-native systems language (WASM + browser runtime first).
@@ -142,4 +142,4 @@ Last updated for v0.5.4.
 4. **Registry ecosystem/discovery depth** (search ranking/pagination, package quality metadata, adoption workflows)
 5. **Cross-file refactor depth + registry polish** (broader semantic-aware LSP transforms, package metadata quality, and higher-order workflow refinements)
 
-Reference: `docs/WEB_NATIVE_ROADMAP.md`
+Reference: [WEB_NATIVE_ROADMAP.md](WEB_NATIVE_ROADMAP.md)

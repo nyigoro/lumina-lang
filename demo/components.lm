@@ -2,7 +2,8 @@ import {
   vnode,
   text,
   props_class,
-  props_merge
+  props_merge,
+  props_href
 } from "@std/render";
 import { Router, link } from "@std/router";
 
@@ -24,6 +25,10 @@ pub fn paragraph(cls: string, content: string) -> VNode {
 
 pub fn button_node(cls: string, label: string, attrs: any) -> VNode {
   return vnode("button", props_merge(props_class(cls), attrs), [text(label)]);
+}
+
+pub fn anchor_node(cls: string, href: string, label: string) -> VNode {
+  return vnode("a", props_merge(props_class(cls), props_href(href)), [text(label)]);
 }
 
 pub fn pre_block(cls: string, content: string) -> VNode {

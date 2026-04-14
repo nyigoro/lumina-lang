@@ -9,12 +9,12 @@ pub fn playground_view() -> VNode {
   let title = heading("Parser Studio");
   let subtitle = paragraph(
     "mt-4 text-lg text-gray-400",
-    "This playground is being prepared. Use the React demo version for full parser studio features."
+    "This route is being migrated into Lumina. Grammar editing, AST inspection, and parser session tooling are next."
   );
 
   let info_box = vnode("div", props_class("rounded-lg border border-gray-700 bg-gray-900 p-6 space-y-4"), [
     subheading("Features Coming Soon"),
-    paragraph("text-sm text-gray- 300", "Grammar editor with PEG syntax support"),
+    paragraph("text-sm text-gray-300", "Grammar editor with PEG syntax support"),
     paragraph("text-sm text-gray-300", "Test input parser and AST visualization"),
     paragraph("text-sm text-gray-300", "Performance metrics and parse history"),
     paragraph("text-sm text-gray-300", "Import/export parser sessions")

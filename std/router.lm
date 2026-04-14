@@ -53,6 +53,39 @@ fn normalize_base(base: string) -> string {
   return trim_trailing_slash(ensure_leading_slash(base))
 }
 
+fn strip_hash_prefix(value: string) -> string {
+  if (str.length(value) == 0) {
+    return ""
+  }
+  if (char_at_or_empty(value, 0) == "#") {
+    if (str.length(value) == 1) {
+      return ""
+    }
+    return str.substring(value, 1, str.length(value))
+  }
+  return value
+}
+
+fn legacy_hash_path(hash: string) -> string {
+  let raw = strip_hash_prefix(hash)
+  if (str.length(raw) == 0) {
+    return ""
+  }
+  if (raw == "home") {
+    return "/"
+  }
+  if (raw == "lumina") {
+    return "/lumina"
+  }
+  if (raw == "playground") {
+    return "/playground"
+  }
+  if (char_at_or_empty(raw, 0) == "/") {
+    return normalize_path(raw)
+  }
+  return ""
+}
+
 fn strip_base_path(path: string, base: string) -> string {
   let normalized_path = normalize_path(path)
   let normalized_base = normalize_base(base)
@@ -81,9 +114,19 @@ fn resolve_href(base: string, path: string) -> string {
   return str.concat(normalized_base, normalized_path)
 }
 
+fn initial_router_path(normalized_base: string) -> string {
+  let hash_path = legacy_hash_path(router.getCurrentHash())
+  if (str.length(hash_path) > 0) {
+    router.replace(resolve_href(normalized_base, hash_path))
+    return hash_path
+  }
+  return strip_base_path(router.getCurrentPath(), normalized_base)
+}
+
 pub fn createRouter(base: string) -> Router {
   let normalized_base = normalize_base(base)
-  let path_signal = reactive.createSignal(strip_base_path(router.getCurrentPath(), normalized_base))
+  let initial_path = initial_router_path(normalized_base)
+  let path_signal = reactive.createSignal(initial_path)
   router.onPopState(fn(pathname: string) -> void {
     let _synced = reactive.set(path_signal, strip_base_path(normalize_path(pathname), normalized_base))
   })

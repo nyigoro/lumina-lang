@@ -82,6 +82,21 @@ export function luminaPlugin(): Plugin {
   let compilerPromise: Promise<CompilerModule> | null = null;
   let parserPromise: Promise<unknown> | null = null;
 
+  const resolveLmImport = (source: string, importer?: string): string | null => {
+    if (source.startsWith('@std/')) {
+      const moduleName = source.slice('@std/'.length);
+      if (!sourceBackedStdModules.has(moduleName)) {
+        return null;
+      }
+      const stdlibPath = path.join(repoRoot, 'std', `${moduleName}.lm`);
+      return fs.existsSync(stdlibPath) ? stdlibPath : null;
+    }
+    if ((source.startsWith('./') || source.startsWith('../')) && source.endsWith('.lm') && importer) {
+      return path.resolve(path.dirname(importer), source);
+    }
+    return null;
+  };
+
   const getCompiler = async (): Promise<CompilerModule> => {
     if (!compilerPromise) {
       compilerPromise = import(pathToFileUrl(path.join(repoRoot, 'dist', 'index.js')).href) as Promise<CompilerModule>;
@@ -104,31 +119,43 @@ export function luminaPlugin(): Plugin {
     const compiler = await getCompiler();
     const parser = await getParser();
     const source = fs.readFileSync(id, 'utf-8');
-    const ast = compiler.parseLumina(parser, source, { grammarSource: id });
-    const generated = compiler.generateJSFromAst(ast, {
-      target: 'esm',
-      includeRuntime: true,
-      sourceMap: false,
-      sourceFile: id,
-      sourceContent: source,
-    });
-    const runtimeSpecifier = normalizeSpecifier(path.dirname(id), runtimePath);
-    const rewritten = generated.code.replace(/from\s+["']\.\/lumina-runtime\.js["']/g, `from ${JSON.stringify(runtimeSpecifier)}`);
-    const resolvedImports = collectResolvedImportStatements(source, id);
-    const withResolvedImports = resolvedImports.length > 0 ? `${resolvedImports.join('\n')}\n${rewritten}` : rewritten;
-    return appendExports(withResolvedImports, collectPublicExports(source));
+
+    try {
+      const ast = compiler.parseLumina(parser, source, { grammarSource: id });
+      const generated = compiler.generateJSFromAst(ast, {
+        target: 'esm',
+        includeRuntime: true,
+        sourceMap: false,
+        sourceFile: id,
+        sourceContent: source,
+      });
+
+      const runtimeSpecifier = normalizeSpecifier(path.dirname(id), runtimePath);
+      const rewritten = generated.code.replace(/from\s+["']\.\/lumina-runtime\.js["']/g, `from ${JSON.stringify(runtimeSpecifier)}`);
+
+      const publicExports = collectPublicExports(source);
+      const final = appendExports(rewritten, publicExports);
+
+      return final;
+    } catch (error) {
+      throw new Error(`Failed to compile ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   return {
     name: 'vite-plugin-lumina',
     enforce: 'pre',
-    async transform(_code, id) {
+    resolveId(source, importer) {
+      const resolved = resolveLmImport(source, importer);
+      if (resolved) {
+        return resolved;
+      }
+      return null;
+    },
+    async load(id) {
       if (!id.endsWith('.lm')) return null;
       try {
-        return {
-          code: await compileModule(id),
-          map: null,
-        };
+        return await compileModule(id);
       } catch (error) {
         this.error(`Lumina plugin error in ${id}:\n${error instanceof Error ? error.message : String(error)}`);
       }

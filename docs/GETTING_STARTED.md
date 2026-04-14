@@ -73,7 +73,7 @@ Notes:
 
 ## 7. VS Code
 
-The extension lives in `vscode-extension/`.
+The extension lives in [vscode-extension/](../vscode-extension/).
 
 ```bash
 cd vscode-extension
@@ -85,8 +85,10 @@ Then launch extension development host from VS Code.
 
 ## 8. Where to Go Next
 
-- Usage guide: `docs/USING_LUMINA.md`
-- Capabilities/status: `docs/CAPABILITIES.md`
-- Stdlib reference: `docs/STDLIB.md`
-- Error handling (`?`): `docs/ERROR_HANDLING.md`
-- Numeric system: `docs/NUMERIC_TYPES.md`
+- [Usage guide](USING_LUMINA.md)
+- [Why Lumina?](WHY_LUMINA.md)
+- [When to use JS vs WASM](WHEN_TO_USE_JS_VS_WASM.md)
+- [Capabilities/status](CAPABILITIES.md)
+- [Stdlib reference](STDLIB.md)
+- [Error handling (`?`)](ERROR_HANDLING.md)
+- [Numeric system](NUMERIC_TYPES.md)

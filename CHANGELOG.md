@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 - **Routing/UI:** Added `@std/router` with browser-history-aware navigation, current-path/search helpers, route matching/param extraction, and declarative link support for Lumina browser apps.
 - **Demo:** Migrated the Lumina-authored browser demo from an internal route signal to URL-aware routing with back/forward browser navigation support.
+- **Docs/Homepage:** Reworked the main landing experience with richer above-the-fold Lumina code, clickable docs links, a `Why Lumina?` comparison page, and target-selection guidance for JS vs WASM.
+- **Demo:** Simplified the browser entry path and added legacy hash-route compatibility so static deep links like `#/lumina` resolve into the new URL-aware demo.
 
 ## [0.5.7] - 2026-04-06
 

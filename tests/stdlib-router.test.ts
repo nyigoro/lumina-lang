@@ -241,6 +241,19 @@ describe('@std/router', () => {
     expect(getPayload(runtime.hashmap.get(params as never, 'view'))).toBe('js');
   });
 
+  test('createRouter upgrades legacy hash routes used by static fallback redirects', () => {
+    const env = installBrowserEnv('/app', {
+      hash: '#/lumina',
+      baseURI: 'https://lumina.dev/app/',
+    });
+    const routerApi = compileRouterStdlib();
+
+    const routerValue = routerApi.createRouter('/app');
+
+    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
+    expect(env.window.history.replacements.at(-1)).toBe('/app/lumina');
+  });
+
   test('navigate and replace update history-backed path state', () => {
     const env = installBrowserEnv('/app', { baseURI: 'https://lumina.dev/app/' });
     const routerApi = compileRouterStdlib();

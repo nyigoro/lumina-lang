@@ -8,6 +8,30 @@ Most languages make you choose: safety or the web. Lumina doesn't.
 
 Lumina is a statically typed, web-native language with HM type inference, algebraic types, and trait-based polymorphism, compiled to JavaScript and WebAssembly. Build reactive UIs, WebGPU workloads, and WASM modules in the same language, with the same type system.
 
+## At a Glance
+
+```lumina
+trait Summary {
+  fn label(self: Self) -> string
+}
+
+enum LoadState {
+  Idle,
+  Ready(Vec<int>),
+  Failed(string)
+}
+
+impl Summary for LoadState {
+  fn label(self: Self) -> string {
+    match self {
+      Idle => "Loading...",
+      Ready(items) => "Ready",
+      Failed(message) => message,
+    }
+  }
+}
+```
+
 ## Install
 
 ```bash
@@ -42,6 +66,21 @@ lumina repl
 
 [Open the live browser demo](https://nyigoro.abrdns.com)
 
+## Why Lumina?
+
+- Lumina aims at the space between TypeScript ergonomics and Rust-style modeling.
+- It keeps one language across browser UI, JS interop, and WASM workloads.
+- It is a better fit than plain TypeScript when you want enums, pattern matching, traits, and stronger guarantees to survive all the way to the browser.
+
+[Read: Why Lumina?](docs/WHY_LUMINA.md)
+
+## Choosing a Target
+
+- Use the JS target when you want the fastest edit-run-debug loop, deep browser/Node interop, or straightforward deployment.
+- Use the WASM target when you want tighter runtime behavior, compute-heavy hot paths, or worker-isolated browser execution.
+
+[Read: When to use JS vs WASM](docs/WHEN_TO_USE_JS_VS_WASM.md)
+
 ## What You Get
 
 - `lumina` CLI for check, compile, run, grammar, bundle, and REPL workflows
@@ -52,12 +91,14 @@ lumina repl
 
 ## Docs
 
-- `docs/GETTING_STARTED.md`
-- `docs/CAPABILITIES.md`
-- `docs/STDLIB.md`
-- `docs/RENDER.md`
-- `docs/WEB_NATIVE_ROADMAP.md`
-- `vscode-extension/`
+- [Getting Started](docs/GETTING_STARTED.md)
+- [Why Lumina?](docs/WHY_LUMINA.md)
+- [When to use JS vs WASM](docs/WHEN_TO_USE_JS_VS_WASM.md)
+- [Capabilities](docs/CAPABILITIES.md)
+- [Stdlib](docs/STDLIB.md)
+- [Render / UI Runtime](docs/RENDER.md)
+- [Web-Native Roadmap](docs/WEB_NATIVE_ROADMAP.md)
+- [VS Code extension](vscode-extension/)
 
 ## Development
 
@@ -70,10 +111,10 @@ npm test
 
 ## Project Files
 
-- `CONTRIBUTING.md`
-- `SECURITY.md`
-- `SUPPORT.md`
-- `CHANGELOG.md`
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
