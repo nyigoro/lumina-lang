@@ -4,7 +4,7 @@ This guide gets you from install to running your first Lumina program.
 
 ## 1. Prerequisites
 
-- Node.js 18+ (20+ recommended)
+- Node.js >= 22.17.0
 - npm, pnpm, or yarn
 
 ## 2. Install

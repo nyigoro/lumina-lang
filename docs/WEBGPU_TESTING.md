@@ -6,7 +6,7 @@ provide GPU hardware. This document explains how to run them locally.
 ## Prerequisites
 - A machine with an integrated or discrete GPU
 - Chrome 113+ or Edge 113+ with WebGPU support
-- Node.js 20+
+- Node.js >= 22.17.0
 - Playwright Chromium installed: `npx playwright install chromium`
 - `wabt` installed if you also run the full browser smoke suite with the WASM
   load spec:
