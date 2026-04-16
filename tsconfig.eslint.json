@@ -3,6 +3,8 @@
   "include": [
     "src/**/*",
     "cli/**/*",
+    "docs-site/**/*.ts",
+    "playground/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*",
     "types/**/*",

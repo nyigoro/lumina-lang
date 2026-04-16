@@ -97,6 +97,33 @@ export default [
     },
   },
 
+  // Node ESM scripts
+  {
+    files: ['**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+      'no-undef': 'off',
+      'no-redeclare': 'off',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-control-regex': 'warn',
+      'no-useless-escape': 'warn',
+      'no-empty': 'warn',
+    },
+  },
+
   // CommonJS scripts
   {
     files: ['**/*.cjs'],
