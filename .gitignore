@@ -16,11 +16,14 @@ pnpm-debug.log*
 .lumina-cache/
 .lumina/
 /.tmp/
+/.tmp-*
 /.tmp-wasm/
 /.tmp-wasm-perf/
 /tmp-*.lm
+/tmp-*.log
 /tmp.lm
 /demo.js
+/demo/lumina-runtime.js
 /lumina-runtime.js
 /lumina.out.js
 /demo/.lumina-vite/

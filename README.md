@@ -23,11 +23,11 @@ enum LoadState {
 
 impl Summary for LoadState {
   fn label(self: Self) -> string {
-    match self {
+    return match self {
       Idle => "Loading...",
-      Ready(items) => "Ready",
-      Failed(message) => message,
-    }
+      Ready(_) => "Ready",
+      Failed(message) => message
+    };
   }
 }
 ```
@@ -62,9 +62,11 @@ Start the REPL:
 lumina repl
 ```
 
-## Browser Demo
+## Live Web Apps
 
-[Open the live browser demo](https://nyigoro.abrdns.com)
+- [Site](https://nyigoro.abrdns.com)
+- [Docs](https://nyigoro.abrdns.com/docs/)
+- [Playground](https://nyigoro.abrdns.com/playground/)
 
 ## Product Structure
 
@@ -72,6 +74,7 @@ lumina repl
 - `docs-content/` is the markdown source tree for the docs portal while `docs/` stays free for static publishing output
 - `docs-site/` is the on-site documentation portal shell backed by prerendered markdown data
 - `playground/` is the focused interactive playground app where the editor and compiler experience will live
+- `docs/` is the generated GitHub Pages output and should be rebuilt, not edited by hand
 - `src/` contains the compiler, runtime, LSP, and stdlib implementation
 
 ## Why Lumina?
@@ -80,14 +83,14 @@ lumina repl
 - It keeps one language across browser UI, JS interop, and WASM workloads.
 - It is a better fit than plain TypeScript when you want enums, pattern matching, traits, and stronger guarantees to survive all the way to the browser.
 
-[Read: Why Lumina?](https://nyigoro.abrdns.com/docs/why-lumina)
+[Read: Why Lumina?](https://nyigoro.abrdns.com/docs/#/why-lumina)
 
 ## Choosing a Target
 
 - Use the JS target when you want the fastest edit-run-debug loop, deep browser/Node interop, or straightforward deployment.
 - Use the WASM target when you want tighter runtime behavior, compute-heavy hot paths, or worker-isolated browser execution.
 
-[Read: When to use JS vs WASM](https://nyigoro.abrdns.com/docs/js-vs-wasm)
+[Read: When to use JS vs WASM](https://nyigoro.abrdns.com/docs/#/js-vs-wasm)
 
 ## What You Get
 
@@ -100,12 +103,12 @@ lumina repl
 ## Docs
 
 - [Docs home](https://nyigoro.abrdns.com/docs/)
-- [Getting Started](https://nyigoro.abrdns.com/docs/getting-started)
-- [Why Lumina?](https://nyigoro.abrdns.com/docs/why-lumina)
-- [When to use JS vs WASM](https://nyigoro.abrdns.com/docs/js-vs-wasm)
-- [Capabilities](https://nyigoro.abrdns.com/docs/capabilities)
-- [Stdlib](https://nyigoro.abrdns.com/docs/stdlib)
-- [Web-Native Roadmap](https://nyigoro.abrdns.com/docs/web-native-roadmap)
+- [Getting Started](https://nyigoro.abrdns.com/docs/#/getting-started)
+- [Why Lumina?](https://nyigoro.abrdns.com/docs/#/why-lumina)
+- [When to use JS vs WASM](https://nyigoro.abrdns.com/docs/#/js-vs-wasm)
+- [Capabilities](https://nyigoro.abrdns.com/docs/#/capabilities)
+- [Stdlib](https://nyigoro.abrdns.com/docs/#/stdlib)
+- [Web-Native Roadmap](https://nyigoro.abrdns.com/docs/#/web-native-roadmap)
 - [VS Code extension](vscode-extension/)
 
 ## Development
@@ -116,6 +119,34 @@ npm run build
 npm run lint:check
 npm test
 ```
+
+## Web Development
+
+Run the three web apps together:
+
+```bash
+npm run web:dev
+```
+
+Ports:
+
+- `127.0.0.1:5173/` - main site
+- `127.0.0.1:5173/docs/` - docs app through the main dev entrypoint
+- `127.0.0.1:5173/playground/` - playground app through the main dev entrypoint
+- `127.0.0.1:5174/docs/` - docs app directly
+- `127.0.0.1:5175/playground/` - playground app directly
+
+Build the full publish tree:
+
+```bash
+npm run web:build
+```
+
+Important notes:
+
+- Edit markdown docs in `docs-content/`, not `docs/`
+- Edit the docs shell in `docs-site/`
+- `docs/` is the generated GitHub Pages output
 
 ## Project Files
 
