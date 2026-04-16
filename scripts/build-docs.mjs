@@ -113,7 +113,7 @@ const buildManifest = async () => {
     const lookupKey = relativePath.replace(/\\/g, '/');
     const baseName = path.basename(file);
     const meta = docConfig.get(baseName) ?? { slug: slugify(lookupKey), section: 'More Docs' };
-    const sourcePath = isDocsContentFile ? `docs/${lookupKey}` : path.relative(repoRoot, file).replace(/\\/g, '/');
+    const sourcePath = isDocsContentFile ? `docs-content/${lookupKey}` : path.relative(repoRoot, file).replace(/\\/g, '/');
     entries.push({
       lookupKey,
       slug: meta.slug,

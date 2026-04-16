@@ -110,6 +110,6 @@ wrap_Option_int(...)
 
 ## Future Work
 
-See `docs/TODO.md` for:
+See [TODO](TODO.md) for:
 - Full type parameter resolution in ADT specialization
 - Dead code elimination for unused monomorphic variants

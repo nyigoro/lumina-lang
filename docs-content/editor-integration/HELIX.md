@@ -15,4 +15,4 @@ command = "lumina-lsp"
 args = ["--stdio"]
 ```
 
-Advanced refactors use `workspace/executeCommand`. See `docs/editor-integration/PROTOCOL.md`.
+Advanced refactors use `workspace/executeCommand`. See [the protocol reference](PROTOCOL.md).

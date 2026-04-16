@@ -52,5 +52,4 @@ npm publish
 
 ## Lockfile Format
 
-See `docs/PACKAGE_MANAGEMENT_PHASE1.md` for the full technical details.
-
+See [Package Management Phase 1](PACKAGE_MANAGEMENT_PHASE1.md) for the full technical details.

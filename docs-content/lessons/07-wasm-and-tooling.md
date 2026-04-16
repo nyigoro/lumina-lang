@@ -18,6 +18,7 @@ WASM:
 
 ```bash
 lumina compile examples/wasm-hello/math.lm --target wasm --out math.wat
+wat2wasm math.wat -o math.wasm
 lumina run-wasm math.wasm main
 ```
 
@@ -43,7 +44,7 @@ npm run build
 ## API Documentation
 
 ```bash
-lumina doc "src/**/*.lm" --out docs/API.md
+lumina doc "src/**/*.lm" --out API.md
 ```
 
 ## Final Exercise

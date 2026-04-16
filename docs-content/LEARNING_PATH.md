@@ -4,7 +4,7 @@ This is a practical, step-by-step path to learn Lumina with runnable exercises.
 
 ## Prerequisites
 
-- Complete `docs/GETTING_STARTED.md`
+- Complete [Getting Started](GETTING_STARTED.md)
 - Confirm `lumina check` and `lumina compile` work locally
 
 ## How to Use This Path
@@ -16,25 +16,25 @@ This is a practical, step-by-step path to learn Lumina with runnable exercises.
 
 ## Lesson Sequence
 
-1. `docs/lessons/01-basics.md`
+1. [Lesson 1](lessons/01-basics.md)
 - Functions, bindings, numbers, strings, interpolation.
 
-2. `docs/lessons/02-types-and-collections.md`
+2. [Lesson 2](lessons/02-types-and-collections.md)
 - Numeric types, arrays, `Vec`, `HashMap`, `HashSet`.
 
-3. `docs/lessons/03-control-flow-and-patterns.md`
+3. [Lesson 3](lessons/03-control-flow-and-patterns.md)
 - `if`, `while`, `for ... in ...`, `match`, `while let`.
 
-4. `docs/lessons/04-errors-and-result.md`
+4. [Lesson 4](lessons/04-errors-and-result.md)
 - `Option`, `Result`, and `?` error propagation.
 
-5. `docs/lessons/05-traits-and-generics.md`
+5. [Lesson 5](lessons/05-traits-and-generics.md)
 - Traits, impls, bounds, associated types, default methods.
 
-6. `docs/lessons/06-concurrency-and-async.md`
+6. [Lesson 6](lessons/06-concurrency-and-async.md)
 - Threads/channels and async ecosystem patterns.
 
-7. `docs/lessons/07-wasm-and-tooling.md`
+7. [Lesson 7](lessons/07-wasm-and-tooling.md)
 - WASM compile/run flow, lint/fmt/doc, release workflow.
 
 ## Suggested Schedule
@@ -53,6 +53,6 @@ This is a practical, step-by-step path to learn Lumina with runnable exercises.
 
 ## Reference While Learning
 
-- `docs/USING_LUMINA.md`
-- `docs/STDLIB.md`
-- `docs/CAPABILITIES.md`
+- [Using Lumina](USING_LUMINA.md)
+- [Stdlib](STDLIB.md)
+- [Capabilities](CAPABILITIES.md)

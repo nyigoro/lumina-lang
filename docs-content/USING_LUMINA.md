@@ -26,6 +26,7 @@ Compile to WebAssembly (beta):
 
 ```bash
 lumina compile src/main.lm --target wasm --out dist/main.wat
+wat2wasm dist/main.wat -o dist/main.wasm
 lumina run-wasm dist/main.wasm main
 ```
 
@@ -34,7 +35,7 @@ Format, lint, and generate docs:
 ```bash
 lumina fmt "src/**/*.lm"
 lumina lint "src/**/*.lm"
-lumina doc "src/**/*.lm" --out docs/API.md
+lumina doc "src/**/*.lm" --out API.md
 ```
 
 ## Core Language Patterns
@@ -157,8 +158,8 @@ npm run build
 
 ## Reference Docs
 
-- `docs/CAPABILITIES.md`
-- `docs/STDLIB.md`
-- `docs/ERROR_HANDLING.md`
-- `docs/NUMERIC_TYPES.md`
-- `docs/CONST_GENERICS.md`
+- [Capabilities](CAPABILITIES.md)
+- [Stdlib](STDLIB.md)
+- [Error handling](ERROR_HANDLING.md)
+- [Numeric types](NUMERIC_TYPES.md)
+- [Const generics](CONST_GENERICS.md)

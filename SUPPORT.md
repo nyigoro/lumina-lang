@@ -2,10 +2,10 @@
 
 ## Where to Start
 
-- usage and setup: `docs/GETTING_STARTED.md`
-- capabilities and status: `docs/CAPABILITIES.md`
-- stdlib and runtime: `docs/STDLIB.md` and `docs/RENDER.md`
-- browser and web-native direction: `docs/WEB_NATIVE_ROADMAP.md`
+- usage and setup: [Getting Started](GETTING_STARTED.md)
+- capabilities and status: [Capabilities](CAPABILITIES.md)
+- stdlib and runtime: [Stdlib](STDLIB.md) and [Render](RENDER.md)
+- browser and web-native direction: [Web-Native Roadmap](WEB_NATIVE_ROADMAP.md)
 
 ## Getting Help
 

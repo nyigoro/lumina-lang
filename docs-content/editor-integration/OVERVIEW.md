@@ -26,4 +26,4 @@ npx lumina-lsp --stdio
 npm install lumina-language-client
 ```
 
-See `docs/editor-integration/PROTOCOL.md` for command ids and payload shapes.
+See [the protocol reference](PROTOCOL.md) for command ids and payload shapes.

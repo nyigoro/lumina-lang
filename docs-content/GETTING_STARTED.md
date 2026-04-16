@@ -57,13 +57,14 @@ Hello Lumina
 ```bash
 lumina fmt "src/**/*.lm"
 lumina lint "src/**/*.lm"
-lumina doc "src/**/*.lm" --out docs/API.md
+lumina doc "src/**/*.lm" --out API.md
 ```
 
 ## 6. Optional: WASM Quick Run
 
 ```bash
 lumina compile examples/wasm-hello/math.lm --target wasm --out math.wat
+wat2wasm math.wat -o math.wasm
 lumina run-wasm math.wasm main
 ```
 

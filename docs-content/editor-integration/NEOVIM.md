@@ -22,4 +22,4 @@ vim.filetype.add({ extension = { lm = 'lumina' } })
 
 ## Advanced refactors
 
-Use `vim.lsp.buf.execute_command` with command ids from `docs/editor-integration/PROTOCOL.md`.
+Use `vim.lsp.buf.execute_command` with command ids from [the protocol reference](PROTOCOL.md).

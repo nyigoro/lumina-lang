@@ -165,4 +165,4 @@ npm run build
 - Ecosystem package discovery is still early-stage.
 - Some advanced type-system features are MVP/beta scoped.
 
-Use `docs/CAPABILITIES.md` as source of truth before migration decisions.
+Use [Capabilities](CAPABILITIES.md) as source of truth before migration decisions.
