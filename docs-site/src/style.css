@@ -151,15 +151,9 @@ a {
 }
 
 .docs-page-title {
-  margin: 0.5rem 0 0;
+  margin: 0.5rem 0 2rem;
   font-size: 2.75rem;
   line-height: 1.1;
-}
-
-.docs-page-source {
-  margin: 0.75rem 0 2rem;
-  color: #94a3b8;
-  font-size: 0.95rem;
 }
 
 .docs-prose {

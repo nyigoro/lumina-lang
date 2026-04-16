@@ -100,7 +100,6 @@ const renderCurrentDoc = async (): Promise<void> => {
           <article class="docs-article">
             <p class="docs-eyebrow">${escapeHtml(page.section)}</p>
             <h1 class="docs-page-title" id="docs-page-title">${escapeHtml(page.title)}</h1>
-            <p class="docs-page-source" id="docs-page-source">${escapeHtml(page.sourcePath)}</p>
             <div class="docs-prose" id="docs-content">${page.html}</div>
           </article>
         </main>
