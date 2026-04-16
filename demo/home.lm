@@ -1,5 +1,5 @@
-import { props_class, vnode, text } from "@std/render";
-import { div_node, heading, subheading, paragraph, pre_block, anchor_node } from "./components.lm";
+import { props_class, props_id, props_merge, vnode, text } from "@std/render";
+import { div_node, heading, subheading, paragraph, anchor_node } from "./components.lm";
 
 pub fn home_view() -> VNode {
   let primary_class = "rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-500";
@@ -35,9 +35,13 @@ pub fn home_view() -> VNode {
     "GitHub"
   );
   let actions = div_node("mt-8 flex flex-wrap gap-4", [playground_button, docs_button, why_button, github_button]);
-  let code_block = pre_block(
-    "overflow-x-auto rounded-2xl border border-gray-800 bg-gray-950 p-5 text-sm leading-6 text-green-300",
-    "import \{ createSignal, get \} from \"@std/reactive\"\nimport \{ vnode, text, props_class \} from \"@std/render\"\n\ntrait Summary \{\n  fn label(self: Self) -> string\n\}\n\nenum LoadState \{\n  Idle,\n  Ready(Vec<int>),\n  Failed(string)\n\}\n\nimpl Summary for LoadState \{\n  fn label(self: Self) -> string \{\n    match self \{\n      Idle => \"Loading...\"\n      Ready(items) => \"Loaded \" + to_string(items.len()) + \" values\"\n      Failed(message) => message\n    \}\n  \}\n\}\n\nfn status_view(count: Signal<int>) -> VNode \{\n  let state = Ready([1, 2, 3])\n  vnode(\"div\", props_class(\"text-white\"), [text(state.label() + \" / clicks=\" + to_string(get(count)))])\n\}"
+  let code_block = vnode(
+    "div",
+    props_merge(
+      props_class("home-code-sample overflow-hidden rounded-2xl border border-gray-800 bg-gray-950 text-sm leading-6"),
+      props_id("home-code-sample")
+    ),
+    [text("Loading syntax-highlighted sample...")]
   );
   let hero_text = div_node("space-y-4", [title, subtitle, hero_copy, actions]);
   let hero = div_node("grid gap-8 py-16 lg:grid-cols-2 lg:items-start", [hero_text, code_block]);

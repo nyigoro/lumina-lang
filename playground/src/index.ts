@@ -158,8 +158,8 @@ window.addEventListener('load', async () => {
             <p class="playground-eyebrow">Lumina Playground</p>
             <h1 class="playground-title">Compile browser-first Lumina code.</h1>
             <p class="playground-copy">
-              Phase 1 keeps the playground focused: presets, a direct CodeMirror editor, browser compilation,
-              diagnostics, and emitted JavaScript in one place.
+              Experiment with Lumina using focused presets, browser compilation, diagnostics,
+              and generated JavaScript in one place.
             </p>
           </div>
           <nav class="playground-actions">

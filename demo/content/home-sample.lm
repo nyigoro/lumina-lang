@@ -1,0 +1,27 @@
+import { createSignal, get } from "@std/reactive"
+import { vnode, text, props_class } from "@std/render"
+
+trait Summary {
+  fn label(self: Self) -> string
+}
+
+enum LoadState {
+  Idle,
+  Ready(Vec<int>),
+  Failed(string)
+}
+
+impl Summary for LoadState {
+  fn label(self: Self) -> string {
+    match self {
+      Idle => "Loading..."
+      Ready(items) => "Loaded " + to_string(items.len()) + " values"
+      Failed(message) => message
+    }
+  }
+}
+
+fn status_view(count: Signal<int>) -> VNode {
+  let state = Ready([1, 2, 3])
+  vnode("div", props_class("text-white"), [text(state.label() + " / clicks=" + to_string(get(count)))])
+}

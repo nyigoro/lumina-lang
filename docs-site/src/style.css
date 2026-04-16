@@ -189,6 +189,16 @@ a {
   background: #020617;
 }
 
+.docs-prose .shiki {
+  margin: 0 0 1rem;
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.docs-prose .shiki .line {
+  display: block;
+}
+
 .docs-prose pre code {
   padding: 0;
   background: transparent;

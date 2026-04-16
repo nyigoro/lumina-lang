@@ -14,16 +14,19 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1f2937; /* bg-gray-800 */
+  background: #1f2937;
+  /* bg-gray-800 */
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563; /* bg-gray-600 */
+  background: #4b5563;
+  /* bg-gray-600 */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280; /* bg-gray-500 */
+  background: #6b7280;
+  /* bg-gray-500 */
 }
 
 /* General input and textarea styles */
@@ -41,12 +44,36 @@ button {
 
 /* Tree visualization specific styles (if applicable, react-d3-tree uses SVG) */
 .tree-node circle {
-  stroke: #60a5fa; /* blue-400 */
+  stroke: #60a5fa;
+  /* blue-400 */
   stroke-width: 1.5px;
 }
 
 .tree-node text {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 10px;
-  fill: #e2e8f0; /* gray-200 */
+  fill: #e2e8f0;
+  /* gray-200 */
+}
+
+.home-code-sample {
+  min-height: 20rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.home-code-sample .shiki {
+  margin: 0;
+  min-height: 100%;
+  overflow-x: auto;
+  padding: 1.25rem;
+}
+
+.home-code-sample .shiki code {
+  display: block;
+  min-width: max-content;
+}
+
+.home-code-sample .line {
+  display: block;
 }

@@ -1,5 +1,6 @@
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { luminaLanguage } from './lumina-language';
 
 export type EditorMountOptions = {
   elementId: string;
@@ -54,6 +55,7 @@ const mountEditor = ({ elementId, initialValue }: EditorMountOptions): void => {
     doc: initialValue,
     extensions: [
       basicSetup,
+      luminaLanguage,
       oneDark,
       EditorView.lineWrapping,
       editorTheme,
