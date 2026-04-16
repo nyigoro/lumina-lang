@@ -1,36 +1,37 @@
 import { text, vnode, props_class } from "@std/render";
-import { get } from "@std/reactive";
-import { Router, currentPath, matchRoute } from "@std/router";
-import { div_node, nav_link } from "./components.lm";
+import { div_node, anchor_node } from "./components.lm";
 import { home_view } from "./home.lm";
-import { lumina_view } from "./lumina-view.lm";
-import { playground_view } from "./playground.lm";
 
-fn current_view(routerValue: Router, code: Signal<string>, output: Signal<string>, status: Signal<string>) -> VNode {
-  let path = get(currentPath(routerValue));
-  if (matchRoute("/lumina", path)) {
-    return lumina_view(code, output, status);
-  }
-  if (matchRoute("/playground", path)) {
-    return playground_view();
-  }
-  return home_view(routerValue);
-}
-
-pub fn app(routerValue: Router, code: Signal<string>, output: Signal<string>, status: Signal<string>) -> VNode {
-  let path = get(currentPath(routerValue));
+pub fn app() -> VNode {
   let nav_class = "border-b border-gray-800 bg-gray-900 px-8 py-3";
   let brand = vnode("span", props_class("text-lg font-bold text-white"), [text("Lumina")]);
   let version = vnode("span", props_class("text-sm text-gray-500"), [text("v0.5.7")]);
   let brand_row = div_node("flex items-center gap-2", [brand, version]);
 
-  let home_button = nav_link(routerValue, "/", "Home", matchRoute("/", path));
-  let lumina_button = nav_link(routerValue, "/lumina", "Playground", matchRoute("/lumina", path));
-  let parser_button = nav_link(routerValue, "/playground", "Parser", matchRoute("/playground", path));
-  let nav_actions = div_node("flex gap-2", [home_button, lumina_button, parser_button]);
+  let active_home = vnode(
+    "span",
+    props_class("inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"),
+    [text("Home")]
+  );
+  let docs_link = anchor_node(
+    "inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white",
+    "/docs/",
+    "Docs"
+  );
+  let playground_link = anchor_node(
+    "inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white",
+    "/playground/",
+    "Playground"
+  );
+  let github_link = anchor_node(
+    "inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white",
+    "https://github.com/nyigoro/lumina-lang",
+    "GitHub"
+  );
+  let nav_actions = div_node("flex gap-2", [active_home, docs_link, playground_link, github_link]);
   let nav_row = div_node("mx-auto flex max-w-6xl items-center justify-between", [brand_row, nav_actions]);
   let nav = vnode("nav", props_class(nav_class), [nav_row]);
 
-  let body = current_view(routerValue, code, output, status);
+  let body = home_view();
   return div_node("min-h-screen bg-gray-950", [nav, body]);
 }

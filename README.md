@@ -66,20 +66,28 @@ lumina repl
 
 [Open the live browser demo](https://nyigoro.abrdns.com)
 
+## Product Structure
+
+- `demo/` currently serves as the Lumina-native marketing site that will be renamed to `site/` in the cleanup pass
+- `docs-content/` is the markdown source tree for the docs portal while `docs/` stays free for static publishing output
+- `docs-site/` is the on-site documentation portal shell backed by prerendered markdown data
+- `playground/` is the focused interactive playground app where the editor and compiler experience will live
+- `src/` contains the compiler, runtime, LSP, and stdlib implementation
+
 ## Why Lumina?
 
 - Lumina aims at the space between TypeScript ergonomics and Rust-style modeling.
 - It keeps one language across browser UI, JS interop, and WASM workloads.
 - It is a better fit than plain TypeScript when you want enums, pattern matching, traits, and stronger guarantees to survive all the way to the browser.
 
-[Read: Why Lumina?](docs/WHY_LUMINA.md)
+[Read: Why Lumina?](https://nyigoro.abrdns.com/docs/why-lumina)
 
 ## Choosing a Target
 
 - Use the JS target when you want the fastest edit-run-debug loop, deep browser/Node interop, or straightforward deployment.
 - Use the WASM target when you want tighter runtime behavior, compute-heavy hot paths, or worker-isolated browser execution.
 
-[Read: When to use JS vs WASM](docs/WHEN_TO_USE_JS_VS_WASM.md)
+[Read: When to use JS vs WASM](https://nyigoro.abrdns.com/docs/js-vs-wasm)
 
 ## What You Get
 
@@ -91,13 +99,13 @@ lumina repl
 
 ## Docs
 
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Why Lumina?](docs/WHY_LUMINA.md)
-- [When to use JS vs WASM](docs/WHEN_TO_USE_JS_VS_WASM.md)
-- [Capabilities](docs/CAPABILITIES.md)
-- [Stdlib](docs/STDLIB.md)
-- [Render / UI Runtime](docs/RENDER.md)
-- [Web-Native Roadmap](docs/WEB_NATIVE_ROADMAP.md)
+- [Docs home](https://nyigoro.abrdns.com/docs/)
+- [Getting Started](https://nyigoro.abrdns.com/docs/getting-started)
+- [Why Lumina?](https://nyigoro.abrdns.com/docs/why-lumina)
+- [When to use JS vs WASM](https://nyigoro.abrdns.com/docs/js-vs-wasm)
+- [Capabilities](https://nyigoro.abrdns.com/docs/capabilities)
+- [Stdlib](https://nyigoro.abrdns.com/docs/stdlib)
+- [Web-Native Roadmap](https://nyigoro.abrdns.com/docs/web-native-roadmap)
 - [VS Code extension](vscode-extension/)
 
 ## Development

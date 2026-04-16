@@ -1,0 +1,5 @@
+import { vnode, text, props_id } from "@std/render";
+
+pub fn app() -> VNode {
+  return vnode("div", props_id("docs-root"), [text("Loading Lumina docs...")]);
+}

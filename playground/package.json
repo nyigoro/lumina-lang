@@ -1,0 +1,11 @@
+{
+  "name": "lumina-playground",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node ../demo/node_modules/vite/bin/vite.js --config vite.config.ts",
+    "build": "node ../demo/node_modules/vite/bin/vite.js build --config vite.config.ts"
+  }
+}

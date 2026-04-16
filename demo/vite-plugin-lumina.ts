@@ -78,6 +78,7 @@ export function luminaPlugin(): Plugin {
   const repoRoot = path.resolve(demoRoot, '..');
   const grammarPath = path.join(repoRoot, 'src', 'grammar', 'lumina.peg');
   const runtimePath = path.join(repoRoot, 'dist', 'lumina-runtime.js');
+  const debug = process.env.LUMINA_VITE_DEBUG === '1';
 
   let compilerPromise: Promise<CompilerModule> | null = null;
   let parserPromise: Promise<unknown> | null = null;
@@ -116,6 +117,9 @@ export function luminaPlugin(): Plugin {
   };
 
   const compileModule = async (id: string): Promise<string> => {
+    if (debug) {
+      console.log(`[lumina-plugin] compiling ${path.relative(repoRoot, id)}`);
+    }
     const compiler = await getCompiler();
     const parser = await getParser();
     const source = fs.readFileSync(id, 'utf-8');
@@ -132,9 +136,16 @@ export function luminaPlugin(): Plugin {
 
       const runtimeSpecifier = normalizeSpecifier(path.dirname(id), runtimePath);
       const rewritten = generated.code.replace(/from\s+["']\.\/lumina-runtime\.js["']/g, `from ${JSON.stringify(runtimeSpecifier)}`);
-
+      const resolvedImports = collectResolvedImportStatements(source, id);
+      const withResolvedImports = resolvedImports.length > 0
+        ? `${resolvedImports.join('\n')}\n${rewritten}`
+        : rewritten;
       const publicExports = collectPublicExports(source);
-      const final = appendExports(rewritten, publicExports);
+      const final = appendExports(withResolvedImports, publicExports);
+
+      if (debug) {
+        console.log(`[lumina-plugin] compiled ${path.relative(repoRoot, id)}`);
+      }
 
       return final;
     } catch (error) {

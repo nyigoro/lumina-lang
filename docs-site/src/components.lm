@@ -1,0 +1,13 @@
+import { vnode, text, props_class, props_href } from "@std/render";
+
+pub fn shell_container(children: any) -> VNode {
+  return vnode("div", props_class("docs-shell"), children);
+}
+
+pub fn section_title(content: string) -> VNode {
+  return vnode("h2", props_class("docs-sidebar-title"), [text(content)]);
+}
+
+pub fn nav_anchor(href: string, label: string) -> VNode {
+  return vnode("a", props_href(href), [text(label)]);
+}

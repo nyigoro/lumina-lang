@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
-import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/postcss';
 import autoprefixer from 'autoprefixer';
 import postcssImport from 'postcss-import';
@@ -9,11 +8,27 @@ import { luminaPlugin } from './vite-plugin-lumina';
 export default defineConfig({
   plugins: [
     luminaPlugin(),
-    react(),
   ],
   root: '.',
   base: './',
-  server: { open: true },
+  server: {
+    open: true,
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      '/docs': {
+        target: 'http://127.0.0.1:5174',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/playground': {
+        target: 'http://127.0.0.1:5175',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
   optimizeDeps: {
     exclude: ['lumina-lang'],
   },
@@ -37,18 +52,11 @@ export default defineConfig({
     outDir: '../docs',
     emptyOutDir: true,
     sourcemap: false,
-    chunkSizeWarningLimit: 1024,
     rollupOptions: {
       external: [],
       onwarn(warning, warn) {
         if (warning.code === 'EVAL') return;
         warn(warning);
-      },
-      output: {
-        manualChunks: {
-          codemirror: ['@uiw/react-codemirror', '@codemirror/lang-javascript', '@codemirror/language', '@codemirror/theme-one-dark'],
-          peggy: ['peggy'],
-        },
       },
     },
   },

@@ -1,0 +1,11 @@
+{
+  "name": "lumina-docs-site",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node ../scripts/build-docs.mjs && node ../demo/node_modules/vite/bin/vite.js --config vite.config.ts",
+    "build": "node ../scripts/build-docs.mjs && node ../demo/node_modules/vite/bin/vite.js build --config vite.config.ts"
+  }
+}

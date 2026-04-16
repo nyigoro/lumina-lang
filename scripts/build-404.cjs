@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const docsDir = path.join(process.cwd(), 'docs');
+const repoRoot = path.resolve(__dirname, '..');
+const docsDir = path.join(repoRoot, 'docs');
 const target = path.join(docsDir, '404.html');
 
 const html = `<!doctype html>
@@ -9,7 +10,7 @@ const html = `<!doctype html>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Redirecting…</title>
+    <title>Redirecting...</title>
     <meta http-equiv="refresh" content="0; url=./">
     <script>
       (function () {
@@ -19,7 +20,7 @@ const html = `<!doctype html>
     </script>
   </head>
   <body>
-    Redirecting…
+    Redirecting...
   </body>
 </html>
 `;
