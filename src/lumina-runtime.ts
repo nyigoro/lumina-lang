@@ -6417,7 +6417,10 @@ const mergePropValue = (name: string, left: unknown, right: unknown): unknown =>
   }
 
   if (isEventProp(name) && typeof left === 'function' && typeof right === 'function') {
-    return composeHandlers(left, right);
+    return composeHandlers(
+      left as (...args: unknown[]) => unknown,
+      right as (...args: unknown[]) => unknown
+    );
   }
 
   return right;
@@ -6469,6 +6472,10 @@ const patchPortalMount = (
       const parent = host.parentNode;
       if (parent) parent.removeChild(host);
     }
+    host = documentLike.createElement('lumina-portal-host');
+    nextTarget.appendChild(host);
+  }
+  if (!host) {
     host = documentLike.createElement('lumina-portal-host');
     nextTarget.appendChild(host);
   }
@@ -7310,6 +7317,9 @@ const getFocusTargetFromEvent = (event: unknown): { focus?: () => void } | null 
   return target && typeof target === 'object' ? (target as { focus?: () => void }) : null;
 };
 
+const elementRecord = (element: DomElementLike): Record<string, unknown> =>
+  element as unknown as Record<string, unknown>;
+
 const getDomAttribute = (element: DomElementLike, name: string): string | null => {
   if (typeof element.getAttribute === 'function') {
     const value = element.getAttribute(name);
@@ -7322,18 +7332,18 @@ const getDomAttribute = (element: DomElementLike, name: string): string | null =
     return value == null ? null : String(value);
   }
 
-  const value = (element as Record<string, unknown>)[name];
+  const value = elementRecord(element)[name];
   return value == null ? null : String(value);
 };
 
 const isElementHidden = (element: DomElementLike): boolean =>
-  (element as Record<string, unknown>).hidden === true || getDomAttribute(element, 'hidden') !== null;
+  elementRecord(element).hidden === true || getDomAttribute(element, 'hidden') !== null;
 
 const isElementDisabled = (element: DomElementLike): boolean =>
-  (element as Record<string, unknown>).disabled === true || getDomAttribute(element, 'disabled') !== null;
+  elementRecord(element).disabled === true || getDomAttribute(element, 'disabled') !== null;
 
 const getElementTabIndex = (element: DomElementLike): number | null => {
-  const raw = (element as Record<string, unknown>).tabIndex ?? getDomAttribute(element, 'tabIndex') ?? getDomAttribute(element, 'tabindex');
+  const raw = elementRecord(element).tabIndex ?? getDomAttribute(element, 'tabIndex') ?? getDomAttribute(element, 'tabindex');
   if (raw === null || raw === undefined || raw === '') return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
@@ -7509,16 +7519,22 @@ const getMenuAnchorRect = (
   return { left, top, right, bottom, width, height };
 };
 
-const pickPopoverOption = <T extends string | number>(
-  props: Record<string, unknown> | null | undefined,
-  key: string,
-  fallback: T
-): T => {
-  const value = props?.[key];
-  if (typeof fallback === 'number') {
-    return (typeof value === 'number' && Number.isFinite(value) ? value : fallback) as T;
-  }
-  return (typeof value === 'string' && value.length > 0 ? value : fallback) as T;
+type PopoverSide = 'top' | 'bottom' | 'left' | 'right';
+type PopoverAlign = 'start' | 'center' | 'end';
+
+const pickPopoverSide = (props: Record<string, unknown> | null | undefined): PopoverSide => {
+  const value = props?.side;
+  return value === 'top' || value === 'bottom' || value === 'left' || value === 'right' ? value : 'bottom';
+};
+
+const pickPopoverAlign = (props: Record<string, unknown> | null | undefined): PopoverAlign => {
+  const value = props?.align;
+  return value === 'start' || value === 'center' || value === 'end' ? value : 'center';
+};
+
+const pickPopoverOffset = (props: Record<string, unknown> | null | undefined): number => {
+  const value = props?.offset;
+  return typeof value === 'number' && Number.isFinite(value) ? value : 8;
 };
 
 const omitPopoverLayoutProps = (
@@ -7536,9 +7552,9 @@ const getPopoverContentStyle = (
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null,
   props: Record<string, unknown> | null | undefined
 ): Record<string, unknown> => {
-  const side = pickPopoverOption(props, 'side', 'bottom');
-  const align = pickPopoverOption(props, 'align', 'center');
-  const offset = pickPopoverOption(props, 'offset', 8);
+  const side = pickPopoverSide(props);
+  const align = pickPopoverAlign(props);
+  const offset = pickPopoverOffset(props);
   const style: Record<string, unknown> = {
     position: 'fixed',
     zIndex: '1001',
@@ -8011,7 +8027,7 @@ export const render = {
           tabIndex: -1,
           'data-lumina-popover-content': 'true',
           'data-state': open ? 'open' : 'closed',
-          'data-side': pickPopoverOption(props, 'side', 'bottom'),
+          'data-side': pickPopoverSide(props),
           style: getPopoverContentStyle(getPopoverAnchorRect(ctx), props),
           onKeyDown: (event?: KeyboardEvent) => {
             if (String(event?.key ?? '') !== 'Escape') return undefined;
@@ -8112,7 +8128,7 @@ export const render = {
           autoFocus: open,
           'data-lumina-menu-content': 'true',
           'data-state': open ? 'open' : 'closed',
-          'data-side': pickPopoverOption(props, 'side', 'bottom'),
+          'data-side': pickPopoverSide(props),
           style: getPopoverContentStyle(getMenuAnchorRect(ctx), props),
           onKeyDown: (event?: KeyboardEvent) => {
             const key = String(event?.key ?? '');

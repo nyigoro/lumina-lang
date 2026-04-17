@@ -1,6 +1,7 @@
 export type FrameSlotKind = 'state' | 'memo' | 'effect';
 
 export type ComponentFunction<P = unknown, T = unknown> = (props: P) => T;
+type ErasedComponentFunction = ComponentFunction<unknown, unknown>;
 
 export interface ContextToken<T = unknown> {
   id: number;
@@ -22,7 +23,7 @@ export interface FrameSlot<T = unknown> {
 
 export interface ComponentFrame {
   id: number;
-  componentFn: ComponentFunction | null;
+  componentFn: ErasedComponentFunction | null;
   parent: ComponentFrame | null;
   key: unknown;
   slotCursor: number;
@@ -245,7 +246,7 @@ export class FrameManager {
       if (existing) {
         this.disposeFrame(existing, false);
       }
-      const frame = this.createFrame(parentFrame, componentFn, key);
+      const frame = this.createFrame(parentFrame, componentFn as ErasedComponentFunction, key);
       parentFrame.keyedChildren.set(key, frame);
       return frame;
     }
@@ -261,7 +262,7 @@ export class FrameManager {
       this.disposeFrame(existing, false);
     }
 
-    const frame = this.createFrame(parentFrame, componentFn, null);
+    const frame = this.createFrame(parentFrame, componentFn as ErasedComponentFunction, null);
     parentFrame.unkeyedChildren[childIndex] = frame;
     return frame;
   }
@@ -279,7 +280,7 @@ export class FrameManager {
 
   private createFrame(
     parent: ComponentFrame | null,
-    componentFn: ComponentFunction | null,
+    componentFn: ErasedComponentFunction | null,
     key: unknown
   ): ComponentFrame {
     return {

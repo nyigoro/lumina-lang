@@ -1,4 +1,4 @@
-import { createContextToken, type ComponentFrame, type ComponentFunction, FrameManager } from '../src/frame-manager.js';
+import { createContextToken, type ComponentFrame, FrameManager } from '../src/frame-manager.js';
 
 const runRoot = <T>(manager: FrameManager, render: () => T): T => {
   manager.beginRender();
