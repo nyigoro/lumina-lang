@@ -1,0 +1,17 @@
+import { render } from "@std";
+
+pub fn root(value: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.tabsRoot(value, renderChildren)
+}
+
+pub fn list(props: any, renderChildren: fn() -> any) -> VNode {
+  render.tabsList(props, renderChildren)
+}
+
+pub fn trigger(value: string, props: any, children: any) -> VNode {
+  render.tabsTrigger(value, props, children)
+}
+
+pub fn panel(value: string, props: any, children: any) -> VNode {
+  render.tabsPanel(value, props, children)
+}

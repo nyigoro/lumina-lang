@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lumina Tabs</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 2rem;
+      display: grid;
+      place-items: center;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(13, 110, 253, 0.14), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.18), transparent 30%),
+        linear-gradient(180deg, #f4f8fc 0%, #e8eef7 100%);
+      color: #10213a;
+    }
+    #app {
+      width: min(94vw, 760px);
+    }
+    .workspace-shell {
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 24px 60px rgba(16, 33, 58, 0.14);
+      padding: 2rem;
+      backdrop-filter: blur(12px);
+    }
+    .workspace-header {
+      display: grid;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .workspace-eyebrow {
+      margin: 0;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #2563eb;
+    }
+    .workspace-title {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 2.75rem);
+      line-height: 1;
+    }
+    .workspace-copy,
+    .workspace-active,
+    .panel-copy {
+      margin: 0;
+      color: #49627f;
+      line-height: 1.6;
+    }
+    .workspace-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .workspace-tab {
+      border: none;
+      border-radius: 999px;
+      padding: 0.8rem 1.1rem;
+      background: #d9e7fb;
+      color: #15315a;
+      cursor: pointer;
+      font: inherit;
+      transition: transform 120ms ease, background 120ms ease, color 120ms ease;
+    }
+    .workspace-tab:hover {
+      transform: translateY(-1px);
+      background: #c8dcfb;
+    }
+    .workspace-tab[data-state="active"] {
+      background: #15315a;
+      color: #ffffff;
+      box-shadow: 0 10px 24px rgba(21, 49, 90, 0.24);
+    }
+    .workspace-panel[data-state="inactive"] {
+      display: none;
+    }
+    .panel-card {
+      padding: 1.5rem;
+      border-radius: 22px;
+      background: linear-gradient(180deg, #ffffff 0%, #eef4fb 100%);
+      border: 1px solid rgba(37, 99, 235, 0.08);
+    }
+    .panel-title {
+      margin: 0 0 0.75rem;
+      font-size: 1.35rem;
+    }
+    @media (max-width: 640px) {
+      body {
+        padding: 1rem;
+      }
+      .workspace-shell {
+        padding: 1.25rem;
+      }
+      .workspace-tabs {
+        display: grid;
+      }
+      .workspace-tab {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./main.generated.js"></script>
+</body>
+</html>

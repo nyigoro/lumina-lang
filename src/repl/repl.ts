@@ -58,7 +58,7 @@ export async function createReplEnvironment(grammarPath: string): Promise<ReplEn
 
 export function createReplEnvironmentFromGrammar(grammarText: string, grammarPath?: string): ReplEnvironment {
   return {
-    parser: compileGrammar(grammarText),
+  parser: compileGrammar(grammarText, { cache: true }),
     grammarPath,
     lexer: createLuminaLexer(),
   };

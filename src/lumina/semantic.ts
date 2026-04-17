@@ -2301,7 +2301,8 @@ function resolveFunctionBody(
   resolving: Set<string>,
   pendingDeps: Map<string, Set<string>>,
   parentScope?: Scope,
-  diGraphs?: Map<string, string>
+  diGraphs?: Map<string, string>,
+  baseDi?: DefiniteAssignment
 ): LuminaType | null {
   if (stmt.type !== 'FnDecl') return null;
   if (options?.skipFunctionBodies?.has(stmt.name)) {
@@ -2426,10 +2427,11 @@ function resolveFunctionBody(
     diGraphs.set(stmt.name, buildCfgDot(stmt.name, stmt.body.body));
   }
   const collector = bodyReturn ? undefined : { types: [] as LuminaType[] };
-  const di = new DefiniteAssignment();
+  const di = baseDi ? baseDi.clone() : new DefiniteAssignment();
   for (const param of stmt.params) {
     di.define(fnScope, param.name, true);
   }
+  hoistLocalFunctionDecls(stmt.body.body, local, diagnostics, fnScope, options, di);
   for (const bodyStmt of stmt.body.body) {
     typeCheckStatement(
       bodyStmt,
@@ -3032,7 +3034,21 @@ function typeCheckStatement(
       return;
     }
     case 'FnDecl': {
-      resolveFunctionBody(stmt, symbols, diagnostics, options, resolving ?? new Set(), pendingDeps ?? new Map(), scope);
+      const resolvedType = resolveFunctionBody(
+        stmt,
+        symbols,
+        diagnostics,
+        options,
+        resolving ?? new Set(),
+        pendingDeps ?? new Map(),
+        scope,
+        undefined,
+        di
+      );
+      const existing = symbols.get(stmt.name);
+      if (existing && resolvedType) {
+        symbols.define({ ...existing, type: resolvedType, pendingReturn: false });
+      }
       return;
     }
     case 'Let': {
@@ -4003,6 +4019,7 @@ function typeCheckStatement(
       const blockScope = new Scope(scope);
       const blockSymbols = cloneSymbolTable(symbols);
       const blockDi = di ?? undefined;
+      hoistLocalFunctionDecls(stmt.body, blockSymbols, diagnostics, blockScope, options, blockDi);
       for (const bodyStmt of stmt.body) {
         typeCheckStatement(
           bodyStmt,
@@ -9773,6 +9790,92 @@ function parseTypeName(typeName: string): { base: string; args: string[] } | nul
   const inner = trimmed.slice(idx + 1, -1);
   const args = splitTypeArgs(inner);
   return { base, args };
+}
+
+function hoistLocalFunctionDecls(
+  statements: ReadonlyArray<LuminaStatement>,
+  symbols: SymbolTable,
+  diagnostics: Diagnostic[],
+  scope?: Scope,
+  options?: AnalyzeOptions,
+  di?: DefiniteAssignment
+): void {
+  for (const stmt of statements) {
+    if (stmt.type !== 'FnDecl') continue;
+
+    warnOnImportedShadow(stmt.name, stmt.location, diagnostics, options);
+    if (scope) {
+      const parentScope = scope.parent;
+      const shadowed = parentScope ? findDefScope(parentScope, stmt.name) : null;
+      if (shadowed) {
+        const shadowedLocation = shadowed.locals.get(stmt.name);
+        const related = shadowedLocation
+          ? [
+              {
+                location: shadowedLocation,
+                message: `Previous '${stmt.name}' declared here`,
+              },
+            ]
+          : undefined;
+        diagnostics.push(
+          diagAt(
+            `Binding '${stmt.name}' shadows a variable from an outer scope`,
+            stmt.location,
+            'warning',
+            'SHADOWED_BINDING',
+            related
+          )
+        );
+      }
+      scope.define(stmt.name, stmt.location);
+      di?.define(scope, stmt.name, true);
+    }
+
+    const mergedTypeParams = mergeWhereTypeBoundsIntoTypeParams(
+      stmt.typeParams,
+      stmt.whereTypeBounds,
+      diagnostics,
+      stmt.location
+    );
+    const typeParams = mergedTypeParams.map((param) => ({
+      name: param.name,
+      bound: (param.bound ?? []).map((bound) => resolveTypeExpr(bound) ?? 'any'),
+      isConst: !!param.isConst,
+      constType: param.constType,
+      higherKindArity: param.higherKindArity,
+    }));
+    const constWhereClauses = (stmt.whereClauses ?? [])
+      .map((clause) => parseConstExprText(renderConstExpr(clause)))
+      .filter((clause): clause is TypeConstExpr => clause != null);
+    let resolvedReturn = resolveTypeExpr(stmt.returnType) ?? 'any';
+    if (resolvedReturn && stmt.async) {
+      const parsed = parseTypeName(resolvedReturn);
+      if (!(parsed && parsed.base === 'Promise' && parsed.args.length === 1)) {
+        resolvedReturn = `Promise<${resolvedReturn}>`;
+      }
+    }
+
+    symbols.define({
+      name: stmt.name,
+      kind: 'function',
+      async: !!stmt.async,
+      comptime: !!stmt.comptime,
+      type: resolvedReturn,
+      pendingReturn: false,
+      location: stmt.location,
+      visibility: stmt.visibility ?? 'private',
+      extern: stmt.extern ?? false,
+      uri: options?.currentUri,
+      typeParams,
+      constWhereClauses,
+      paramTypes: stmt.params.map((param) => resolveTypeExpr(param.typeName) ?? 'any'),
+      paramNames: stmt.params.map((param) => param.name),
+      paramDefaults: stmt.params.map((param) => param.defaultValue ?? null),
+      paramRefs: stmt.params.map((param) => !!param.ref),
+      paramRefMuts: stmt.params.map((param) => !!param.refMut),
+      externModule: stmt.externModule ?? null,
+    });
+  }
 }
 
 function parseFunctionTypeName(typeName: LuminaType | null | undefined): { params: LuminaType[]; returnType: LuminaType } | null {

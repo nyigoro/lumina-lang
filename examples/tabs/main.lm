@@ -1,0 +1,62 @@
+import { createSignal, get } from "@std/reactive";
+import {
+  createDomRenderer,
+  dom_get_element_by_id,
+  mount_reactive,
+  props_class,
+  text,
+  vnode
+} from "@std/render";
+import { list as tabs_list, panel, root, trigger } from "@std/tabs";
+
+fn panelCard(title: string, copy: string) -> VNode {
+  vnode("article", props_class("panel-card"), [
+    vnode("h2", props_class("panel-title"), [text(title)]),
+    vnode("p", props_class("panel-copy"), [text(copy)])
+  ])
+}
+
+fn tabsView(active: Signal<string>) -> VNode {
+  root(active, || vnode("div", props_class("workspace-shell"), [
+    vnode("header", props_class("workspace-header"), [
+      vnode("p", props_class("workspace-eyebrow"), [text("Headless tabs")]),
+      vnode("h1", props_class("workspace-title"), [text("Lumina product workspace")]),
+      vnode("p", props_class("workspace-copy"), [
+        text("This example uses @std/tabs with reactive state, ARIA wiring, and portable render helpers.")
+      ]),
+      vnode("p", props_class("workspace-active"), [text("Active tab: "), text(get(active))])
+    ]),
+    tabs_list(props_class("workspace-tabs"), || [
+      trigger("overview", props_class("workspace-tab"), [text("Overview")]),
+      trigger("activity", props_class("workspace-tab"), [text("Activity")]),
+      trigger("settings", props_class("workspace-tab"), [text("Settings")])
+    ]),
+    panel("overview", props_class("workspace-panel"), [
+      panelCard(
+        "Overview",
+        "Stable component frames and keyed identity make tab switches feel predictable instead of rebuilding local UI state."
+      )
+    ]),
+    panel("activity", props_class("workspace-panel"), [
+      panelCard(
+        "Activity",
+        "Keyboard navigation works with Arrow keys, Home, and End while the selected tab stays in sync with the signal."
+      )
+    ]),
+    panel("settings", props_class("workspace-panel"), [
+      panelCard(
+        "Settings",
+        "Because tabs are headless, styling stays local to the app while the runtime keeps the accessibility attributes coherent."
+      )
+    ])
+  ]))
+}
+
+pub fn main() -> void {
+  let container = dom_get_element_by_id("app");
+  let renderer = createDomRenderer();
+  let active = createSignal("overview");
+  let _mounted = mount_reactive(renderer, container, || tabsView(active));
+}
+
+main();

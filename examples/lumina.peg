@@ -791,9 +791,9 @@ PrimaryAtom
   = SelectExpr
   / MatchExpr
   / MacroInvokeExpr
-  / ListComprehension
-  / ArrayRepeatLiteral
   / ArrayLiteral
+  / ArrayRepeatLiteral
+  / ListComprehension
   / TupleLiteral
   / StructLiteral
   / PipeLambdaExpr
@@ -933,9 +933,12 @@ MoveLambdaExpr
     }
 
 ZeroArgLambdaExpr
-  = "||" _ body:Expr {
-      const ret = createNode("Return", { value: body }, location);
-      const lambdaBody = createNode("Block", { body: [ret] }, location);
+  = "||" _ body:(Block / Expr) {
+      let lambdaBody = body;
+      if (!lambdaBody || lambdaBody.type !== "Block") {
+        const ret = createNode("Return", { value: body }, location);
+        lambdaBody = createNode("Block", { body: [ret] }, location);
+      }
       return createNode("Lambda", {
         async: false,
         params: [],
@@ -1239,7 +1242,7 @@ QualifiedCall
 ArgList
   = head:Arg tail:(_ "," _ Arg)* { return [head].concat(tail.map(t => t[3])); }
 Arg
-  = name:IdName _ ":" !(":" / "::") _ value:Expr {
+  = &(IdName _ ":" !(":" / "::")) name:IdName _ ":" !(":" / "::") _ value:Expr {
       return { named: true, name: name.name, value, location: name.location };
     }
   / value:Expr {

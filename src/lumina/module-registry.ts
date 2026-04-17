@@ -4690,6 +4690,48 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const propsOnChangeType: Type = fnType([fnType([primitive('string')], primitive('void'))], primitive('any'));
     const propsMergeType: Type = fnType([primitive('any'), primitive('any')], primitive('any'));
     const domGetElementByIdType: Type = fnType([primitive('string')], primitive('any'));
+    const componentPropsT = freshTypeVar();
+    const componentFnType: Type = fnType([componentPropsT], vnodeT);
+    const componentType: Type = fnType([componentFnType, componentPropsT], vnodeT);
+    const componentKeyedType: Type = fnType([componentFnType, componentPropsT, primitive('any')], vnodeT);
+    const contextDefaultT = freshTypeVar();
+    const createContextType: Type = fnType([contextDefaultT], primitive('any'));
+    const createRequiredContextType: Type = fnType([], primitive('any'));
+    const withContextChildrenType: Type = fnType([], primitive('any'));
+    const withContextType: Type = fnType([primitive('any'), primitive('any'), withContextChildrenType], vnodeT);
+    const useContextType: Type = fnType([primitive('any')], primitive('any'));
+    const stateValueT = freshTypeVar();
+    const stateType: Type = fnType([stateValueT], adt('Signal', [stateValueT]));
+    const rememberValueT = freshTypeVar();
+    const rememberType: Type = fnType([fnType([], rememberValueT)], rememberValueT);
+    const childrenResolveType: Type = fnType([primitive('any')], primitive('any'));
+    const slotType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const slotOrType: Type = fnType([primitive('any'), primitive('any'), primitive('any')], vnodeT);
+    const composeHandlersType: Type = fnType([primitive('any'), primitive('any')], primitive('any'));
+    const portalType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const portalBodyType: Type = fnType([primitive('any')], vnodeT);
+    const renderChildrenType: Type = fnType([], primitive('any'));
+    const tabsRootType: Type = fnType([adt('Signal', [primitive('string')]), renderChildrenType], vnodeT);
+    const tabsListType: Type = fnType([primitive('any'), renderChildrenType], vnodeT);
+    const tabsTriggerType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], vnodeT);
+    const tabsPanelType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], vnodeT);
+    const dialogRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
+    const dialogPortalType: Type = fnType([primitive('any')], vnodeT);
+    const dialogTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const dialogOverlayType: Type = fnType([primitive('any')], vnodeT);
+    const dialogContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const dialogTitleType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const dialogDescriptionType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const dialogCloseType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const popoverRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
+    const popoverPortalType: Type = fnType([primitive('any')], vnodeT);
+    const popoverTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const popoverContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const menuRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
+    const menuPortalType: Type = fnType([primitive('any')], vnodeT);
+    const menuTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const menuContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const menuItemType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], vnodeT);
     const isVNodeType: Type = fnType([primitive('any')], primitive('bool'));
     const serializeType: Type = fnType([vnodeT], primitive('string'));
     const parseType: Type = fnType([primitive('string')], vnodeT);
@@ -5074,6 +5116,391 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'any',
             schemeFromVars(domGetElementByIdType, []),
             ['id'],
+            'std://render'
+          ),
+        ],
+        [
+          'component',
+          moduleFunctionWithScheme(
+            'component',
+            ['fn(any) -> VNode', 'any'],
+            'VNode',
+            schemeFromVars(componentType, [componentPropsT]),
+            ['renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'component_keyed',
+          moduleFunctionWithScheme(
+            'component_keyed',
+            ['fn(any) -> VNode', 'any', 'any'],
+            'VNode',
+            schemeFromVars(componentKeyedType, [componentPropsT]),
+            ['renderFn', 'props', 'key'],
+            'std://render'
+          ),
+        ],
+        [
+          'create_context',
+          moduleFunctionWithScheme(
+            'create_context',
+            ['any'],
+            'any',
+            schemeFromVars(createContextType, [contextDefaultT]),
+            ['defaultValue'],
+            'std://render'
+          ),
+        ],
+        [
+          'create_required_context',
+          moduleFunctionWithScheme(
+            'create_required_context',
+            [],
+            'any',
+            schemeFromVars(createRequiredContextType, []),
+            [],
+            'std://render'
+          ),
+        ],
+        [
+          'with_context',
+          moduleFunctionWithScheme(
+            'with_context',
+            ['any', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(withContextType, []),
+            ['context', 'value', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'use_context',
+          moduleFunctionWithScheme(
+            'use_context',
+            ['any'],
+            'any',
+            schemeFromVars(useContextType, []),
+            ['context'],
+            'std://render'
+          ),
+        ],
+        [
+          'state',
+          moduleFunctionWithScheme(
+            'state',
+            ['any'],
+            'Signal<any>',
+            schemeFromVars(stateType, [stateValueT]),
+            ['initial'],
+            'std://render'
+          ),
+        ],
+        [
+          'remember',
+          moduleFunctionWithScheme(
+            'remember',
+            ['fn() -> any'],
+            'any',
+            schemeFromVars(rememberType, [rememberValueT]),
+            ['compute'],
+            'std://render'
+          ),
+        ],
+        [
+          'children',
+          moduleFunctionWithScheme(
+            'children',
+            ['any'],
+            'any',
+            schemeFromVars(childrenResolveType, []),
+            ['input'],
+            'std://render'
+          ),
+        ],
+        [
+          'slot',
+          moduleFunctionWithScheme(
+            'slot',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(slotType, []),
+            ['slotValue', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'slot_or',
+          moduleFunctionWithScheme(
+            'slot_or',
+            ['any', 'any', 'any'],
+            'VNode',
+            schemeFromVars(slotOrType, []),
+            ['slotValue', 'props', 'fallback'],
+            'std://render'
+          ),
+        ],
+        [
+          'compose_handlers',
+          moduleFunctionWithScheme(
+            'compose_handlers',
+            ['any', 'any'],
+            'any',
+            schemeFromVars(composeHandlersType, []),
+            ['left', 'right'],
+            'std://render'
+          ),
+        ],
+        [
+          'portal',
+          moduleFunctionWithScheme(
+            'portal',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(portalType, []),
+            ['target', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'portalBody',
+          moduleFunctionWithScheme(
+            'portalBody',
+            ['any'],
+            'VNode',
+            schemeFromVars(portalBodyType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'tabsRoot',
+          moduleFunctionWithScheme(
+            'tabsRoot',
+            ['Signal<string>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(tabsRootType, []),
+            ['value', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'tabsList',
+          moduleFunctionWithScheme(
+            'tabsList',
+            ['any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(tabsListType, []),
+            ['props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'tabsTrigger',
+          moduleFunctionWithScheme(
+            'tabsTrigger',
+            ['string', 'any', 'any'],
+            'VNode',
+            schemeFromVars(tabsTriggerType, []),
+            ['value', 'props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'tabsPanel',
+          moduleFunctionWithScheme(
+            'tabsPanel',
+            ['string', 'any', 'any'],
+            'VNode',
+            schemeFromVars(tabsPanelType, []),
+            ['value', 'props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogRoot',
+          moduleFunctionWithScheme(
+            'dialogRoot',
+            ['Signal<bool>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(dialogRootType, []),
+            ['open', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogPortal',
+          moduleFunctionWithScheme(
+            'dialogPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(dialogPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogTrigger',
+          moduleFunctionWithScheme(
+            'dialogTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(dialogTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogOverlay',
+          moduleFunctionWithScheme(
+            'dialogOverlay',
+            ['any'],
+            'VNode',
+            schemeFromVars(dialogOverlayType, []),
+            ['props'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogContent',
+          moduleFunctionWithScheme(
+            'dialogContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(dialogContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogTitle',
+          moduleFunctionWithScheme(
+            'dialogTitle',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(dialogTitleType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogDescription',
+          moduleFunctionWithScheme(
+            'dialogDescription',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(dialogDescriptionType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'dialogClose',
+          moduleFunctionWithScheme(
+            'dialogClose',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(dialogCloseType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'popoverRoot',
+          moduleFunctionWithScheme(
+            'popoverRoot',
+            ['Signal<bool>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(popoverRootType, []),
+            ['open', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'popoverPortal',
+          moduleFunctionWithScheme(
+            'popoverPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(popoverPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'popoverTrigger',
+          moduleFunctionWithScheme(
+            'popoverTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(popoverTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'popoverContent',
+          moduleFunctionWithScheme(
+            'popoverContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(popoverContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'menuRoot',
+          moduleFunctionWithScheme(
+            'menuRoot',
+            ['Signal<bool>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(menuRootType, []),
+            ['open', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'menuPortal',
+          moduleFunctionWithScheme(
+            'menuPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(menuPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'menuTrigger',
+          moduleFunctionWithScheme(
+            'menuTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(menuTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'menuContent',
+          moduleFunctionWithScheme(
+            'menuContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(menuContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'menuItem',
+          moduleFunctionWithScheme(
+            'menuItem',
+            ['string', 'any', 'any'],
+            'VNode',
+            schemeFromVars(menuItemType, []),
+            ['value', 'props', 'children'],
             'std://render'
           ),
         ],

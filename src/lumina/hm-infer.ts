@@ -785,6 +785,7 @@ function inferFunctionBody(
       fnEnv.extend(param.name, { kind: 'scheme', variables: [], type: t });
     }
   });
+  hoistLocalFunctionDecls(stmt.body.body, fnEnv, holeInfoByVar);
   for (let index = 0; index < stmt.body.body.length; index += 1) {
     const bodyStmt = stmt.body.body[index];
     const isTailExpr = index === stmt.body.body.length - 1 && bodyStmt.type === 'ExprStmt';
@@ -818,6 +819,23 @@ function inferFunctionBody(
   return { kind: 'function', args: signature.paramTypes, returnType: effectiveReturn };
 }
 
+function hoistLocalFunctionDecls(
+  statements: ReadonlyArray<LuminaStatement>,
+  env: TypeEnv,
+  holeInfoByVar?: Map<number, HoleInfo>
+): void {
+  for (const stmt of statements) {
+    if (stmt.type !== 'FnDecl') continue;
+    const signature = buildFunctionSignature(stmt, holeInfoByVar);
+    const effectiveReturn = stmt.async ? promiseType(signature.returnType) : signature.returnType;
+    env.extend(stmt.name, {
+      kind: 'scheme',
+      variables: signature.typeParamIds,
+      type: { kind: 'function', args: signature.paramTypes, returnType: effectiveReturn },
+    });
+  }
+}
+
 function inferStatement(
   stmt: LuminaStatement,
   env: TypeEnv,
@@ -849,6 +867,7 @@ function inferStatement(
           fnEnv.extend(param.name, { kind: 'scheme', variables: [], type: t });
         }
       });
+      hoistLocalFunctionDecls(stmt.body.body, fnEnv, holeInfoByVar);
       const { paramTypes, returnType, typeParamIds } = signature;
       for (let index = 0; index < stmt.body.body.length; index += 1) {
         const bodyStmt = stmt.body.body[index];
@@ -989,6 +1008,7 @@ function inferStatement(
       const thenEnv = env.child();
       applyMatchPattern(stmt.pattern, valueType, thenEnv, subst, diagnostics, enumRegistry);
       const elseEnv = env.child();
+      hoistLocalFunctionDecls(stmt.elseBlock.body, elseEnv, holeInfoByVar);
       for (const bodyStmt of stmt.elseBlock.body) {
         inferStatement(
           bodyStmt,
@@ -1107,6 +1127,7 @@ function inferStatement(
           thenEnv.extend(narrowing.name, { kind: 'scheme', variables: [], type: narrowing.type });
         }
       }
+      hoistLocalFunctionDecls(stmt.thenBlock.body, thenEnv, holeInfoByVar);
       for (const bodyStmt of stmt.thenBlock.body) {
         inferStatement(
           bodyStmt,
@@ -1143,6 +1164,7 @@ function inferStatement(
             elseEnv.extend(narrowing.name, { kind: 'scheme', variables: [], type: narrowing.type });
           }
         }
+        hoistLocalFunctionDecls(stmt.elseBlock.body, elseEnv, holeInfoByVar);
         for (const bodyStmt of stmt.elseBlock.body) {
           inferStatement(
             bodyStmt,
@@ -1182,6 +1204,7 @@ function inferStatement(
       if (!valueType) return null;
       const thenEnv = env.child();
       applyMatchPattern(stmt.pattern, valueType, thenEnv, subst, diagnostics, enumRegistry);
+      hoistLocalFunctionDecls(stmt.thenBlock.body, thenEnv, holeInfoByVar);
       for (const bodyStmt of stmt.thenBlock.body) {
         inferStatement(
           bodyStmt,
@@ -1204,6 +1227,7 @@ function inferStatement(
       }
       if (stmt.elseBlock) {
         const elseEnv = env.child();
+        hoistLocalFunctionDecls(stmt.elseBlock.body, elseEnv, holeInfoByVar);
         for (const bodyStmt of stmt.elseBlock.body) {
           inferStatement(
             bodyStmt,
@@ -1247,6 +1271,7 @@ function inferStatement(
         });
       }
       const loopEnv = env.child();
+      hoistLocalFunctionDecls(stmt.body.body, loopEnv, holeInfoByVar);
       activeInferLoopDepth += 1;
       try {
         for (const bodyStmt of stmt.body.body) {
@@ -1295,6 +1320,7 @@ function inferStatement(
       }
       const loopEnv = env.child();
       loopEnv.extend(stmt.iterator, { kind: 'scheme', variables: [], type: { kind: 'primitive', name: 'i32' } });
+      hoistLocalFunctionDecls(stmt.body.body, loopEnv, holeInfoByVar);
       activeInferLoopDepth += 1;
       try {
         for (const bodyStmt of stmt.body.body) {
@@ -1339,6 +1365,7 @@ function inferStatement(
       if (scrutineeType) {
         applyMatchPattern(stmt.pattern, scrutineeType, loopEnv, subst, diagnostics, enumRegistry);
       }
+      hoistLocalFunctionDecls(stmt.body.body, loopEnv, holeInfoByVar);
       activeInferLoopDepth += 1;
       try {
         for (const bodyStmt of stmt.body.body) {
@@ -1430,6 +1457,7 @@ function inferStatement(
               });
             }
           }
+          hoistLocalFunctionDecls(arm.body.body, armEnv, holeInfoByVar);
           for (const bodyStmt of arm.body.body) {
             inferStatement(
               bodyStmt,
@@ -1462,6 +1490,7 @@ function inferStatement(
       return null;
     case 'Block': {
       const blockEnv = env.child();
+      hoistLocalFunctionDecls(stmt.body, blockEnv, holeInfoByVar);
       for (const bodyStmt of stmt.body) {
         inferStatement(
           bodyStmt,
@@ -1909,6 +1938,7 @@ function inferExpr(
             );
           }
         } else {
+          hoistLocalFunctionDecls(expr.body.body, lambdaEnv);
           for (const bodyStmt of expr.body.body) {
             inferStatement(
               bodyStmt,
