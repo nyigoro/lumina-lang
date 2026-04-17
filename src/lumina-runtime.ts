@@ -6083,7 +6083,7 @@ interface DomEventTargetLike {
 
 interface DomNodeLike extends DomEventTargetLike {
   textContent: string | null;
-  childNodes: DomNodeLike[];
+  childNodes: ArrayLike<DomNodeLike> & Iterable<DomNodeLike>;
   parentNode: DomNodeLike | null;
   appendChild: (node: DomNodeLike) => DomNodeLike;
   removeChild: (node: DomNodeLike) => DomNodeLike;
@@ -6262,7 +6262,7 @@ const updateDomProperties = (
 };
 
 const setChildren = (container: DomNodeLike, children: DomNodeLike[]): void => {
-  const current = Array.from(container.childNodes);
+  const current = readChildNodes(container);
   for (const child of current) {
     container.removeChild(child);
   }
@@ -6308,7 +6308,7 @@ const disposeDomNode = (
   }
   portalStore.delete(node);
 
-  for (const child of Array.from(node.childNodes ?? [])) {
+  for (const child of readChildNodes(node)) {
     disposeDomNode(child, eventStore, portalStore);
   }
 
@@ -6321,7 +6321,7 @@ const replaceChildren = (
   eventStore: DomEventStore,
   portalStore: DomPortalStore
 ): void => {
-  const current = Array.from(container.childNodes);
+  const current = readChildNodes(container);
   for (const child of current) {
     disposeDomNode(child, eventStore, portalStore);
     container.removeChild(child);
@@ -6563,7 +6563,7 @@ const patchDomChildrenWithKeys = (
   eventStore: DomEventStore,
   portalStore: DomPortalStore
 ): void => {
-  const currentDomChildren = Array.from(element.childNodes);
+  const currentDomChildren = readChildNodes(element);
   const prevKeyed = new Map<string | number, { vnode: VNode; domNode: DomNodeLike }>();
   const prevUnkeyed: Array<{ vnode: VNode; domNode: DomNodeLike }> = [];
 
@@ -6711,7 +6711,7 @@ export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
     },
     hydrate(node: VNode, container: unknown): void {
       const domContainer = container as DomNodeLike;
-      const existing = domContainer.childNodes?.[0] ?? null;
+      const existing = readChildNodes(domContainer)[0] ?? null;
       if (!existing) {
         const domNode = createDomNode(node, documentLike, eventStore, portalStore);
         replaceChildren(domContainer, [domNode], eventStore, portalStore);
@@ -7319,6 +7319,9 @@ const getFocusTargetFromEvent = (event: unknown): { focus?: () => void } | null 
 
 const elementRecord = (element: DomElementLike): Record<string, unknown> =>
   element as unknown as Record<string, unknown>;
+const readChildNodes = (
+  node: { childNodes?: ArrayLike<DomNodeLike> | Iterable<DomNodeLike> } | null | undefined
+): DomNodeLike[] => Array.from(node?.childNodes ?? []);
 
 const getDomAttribute = (element: DomElementLike, name: string): string | null => {
   if (typeof element.getAttribute === 'function') {
@@ -7368,12 +7371,12 @@ const isFocusableElement = (element: DomElementLike): boolean => {
 const collectFocusableDescendants = (root: DomNodeLike): DomElementLike[] => {
   const focusable: DomElementLike[] = [];
   const visit = (node: DomNodeLike): void => {
-    for (const child of Array.from(node.childNodes ?? [])) {
+    for (const child of readChildNodes(node)) {
       const element = child as DomElementLike;
       if (typeof element.focus === 'function' && isFocusableElement(element)) {
         focusable.push(element);
       }
-      if (Array.isArray(child.childNodes) && child.childNodes.length > 0) {
+      if (readChildNodes(child).length > 0) {
         visit(child);
       }
     }
@@ -7386,7 +7389,7 @@ const trapDialogTabNavigation = (event: KeyboardEvent | undefined): boolean => {
   if (String(event?.key ?? '') !== 'Tab') return false;
 
   const container = getFocusTargetFromEvent(event) as (DomElementLike & { ownerDocument?: { activeElement?: unknown } }) | null;
-  if (!container || !Array.isArray(container.childNodes)) return false;
+  if (!container) return false;
 
   const focusable = collectFocusableDescendants(container);
   if (focusable.length === 0) {

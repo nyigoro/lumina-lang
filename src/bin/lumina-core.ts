@@ -773,14 +773,119 @@ function parseTypeNameLite(typeName: string): { base: string; args: string[] } |
   return { base, args };
 }
 
-function rewriteTypeNameLite(typeExpr: unknown, renameMap: Map<string, string>): unknown {
+type RewriteScopeLite = {
+  values: Set<string>;
+  types: Set<string>;
+};
+
+const createRewriteScopeLite = (): RewriteScopeLite => ({
+  values: new Set<string>(),
+  types: new Set<string>(),
+});
+
+const extendValueScopeLite = (
+  scope: RewriteScopeLite,
+  names: Iterable<string>,
+  renameMap: Map<string, string>,
+  namespaceAliases: Map<string, string | null>
+): RewriteScopeLite => {
+  let next: Set<string> | null = null;
+  for (const name of names) {
+    if (!renameMap.has(name) && !namespaceAliases.has(name)) continue;
+    const active = next ?? scope.values;
+    if (active.has(name)) continue;
+    if (!next) next = new Set(scope.values);
+    next.add(name);
+  }
+  return next ? { ...scope, values: next } : scope;
+};
+
+const extendTypeScopeLite = (
+  scope: RewriteScopeLite,
+  names: Iterable<string>,
+  renameMap: Map<string, string>
+): RewriteScopeLite => {
+  let next: Set<string> | null = null;
+  for (const name of names) {
+    if (!renameMap.has(name)) continue;
+    const active = next ?? scope.types;
+    if (active.has(name)) continue;
+    if (!next) next = new Set(scope.types);
+    next.add(name);
+  }
+  return next ? { ...scope, types: next } : scope;
+};
+
+function collectPatternBindingsLite(pattern: unknown): string[] {
+  if (!pattern || typeof pattern !== 'object') return [];
+  const node = pattern as {
+    type?: string;
+    name?: string;
+    bindings?: unknown[];
+    patterns?: unknown[];
+    elements?: unknown[];
+    fields?: Array<{ pattern?: unknown }>;
+  };
+
+  switch (node.type) {
+    case 'BindingPattern':
+    case 'RefBindingPattern':
+      return typeof node.name === 'string' ? [node.name] : [];
+    case 'EnumPattern': {
+      const bindings = Array.isArray(node.bindings)
+        ? node.bindings.filter((value): value is string => typeof value === 'string')
+        : [];
+      const nested = Array.isArray(node.patterns)
+        ? node.patterns.flatMap((child) => collectPatternBindingsLite(child))
+        : [];
+      return [...bindings, ...nested];
+    }
+    case 'TuplePattern':
+      return Array.isArray(node.elements)
+        ? node.elements.flatMap((child) => collectPatternBindingsLite(child))
+        : [];
+    case 'StructPattern':
+      return Array.isArray(node.fields)
+        ? node.fields.flatMap((field) => collectPatternBindingsLite(field?.pattern))
+        : [];
+    default:
+      return [];
+  }
+}
+
+function rewriteTypeNameLiteScoped(
+  typeExpr: unknown,
+  renameMap: Map<string, string>,
+  typeScope: Set<string>
+): unknown {
   if (typeof typeExpr !== 'string') return typeExpr;
   const parsed = parseTypeNameLite(typeExpr);
-  if (!parsed) return renameMap.get(typeExpr) ?? typeExpr;
-  const base = renameMap.get(parsed.base) ?? parsed.base;
+  if (!parsed) return typeScope.has(typeExpr) ? typeExpr : (renameMap.get(typeExpr) ?? typeExpr);
+  const base = typeScope.has(parsed.base) ? parsed.base : (renameMap.get(parsed.base) ?? parsed.base);
   if (parsed.args.length === 0) return base;
-  const args = parsed.args.map((arg) => rewriteTypeNameLite(arg, renameMap) as string);
+  const args = parsed.args.map((arg) => rewriteTypeNameLiteScoped(arg, renameMap, typeScope) as string);
   return `${base}<${args.join(',')}>`;
+}
+
+function rewriteTypeParamsLite(
+  typeParams: unknown,
+  scope: RewriteScopeLite,
+  renameMap: Map<string, string>
+): { typeParams: unknown; scope: RewriteScopeLite } {
+  if (!Array.isArray(typeParams)) return { typeParams, scope };
+  let currentScope = scope;
+  const rewritten = typeParams.map((param) => {
+    const node = param as { name?: unknown; bound?: unknown[] };
+    const next = { ...(param as Record<string, unknown>) };
+    if (Array.isArray(node.bound)) {
+      next.bound = node.bound.map((bound) => rewriteTypeNameLiteScoped(bound, renameMap, currentScope.types));
+    }
+    if (typeof node.name === 'string') {
+      currentScope = extendTypeScopeLite(currentScope, [node.name], renameMap);
+    }
+    return next;
+  });
+  return { typeParams: rewritten, scope: currentScope };
 }
 
 function rewriteProgramImports(
@@ -791,45 +896,114 @@ function rewriteProgramImports(
   namespaceMemberRenames: Map<string, Map<string, string>> = new Map()
 ): { type: string; body: unknown[]; location?: unknown } {
   const makeIdentifier = (name: string, location?: unknown) => ({ type: 'Identifier', name, location });
-  const rewriteExpr = (expr: unknown): unknown => {
+  const rewriteWhereTypeBounds = (
+    bounds: unknown,
+    scope: RewriteScopeLite
+  ): unknown =>
+    Array.isArray(bounds)
+      ? bounds.map((bound) => {
+          const node = bound as { bounds?: unknown[] };
+          return {
+            ...(bound as Record<string, unknown>),
+            bounds: Array.isArray(node.bounds)
+              ? node.bounds.map((entry) => rewriteTypeNameLiteScoped(entry, renameMap, scope.types))
+              : node.bounds,
+          };
+        })
+      : bounds;
+
+  const rewritePattern = (pattern: unknown, scope: RewriteScopeLite): unknown => {
+    if (!pattern || typeof pattern !== 'object') return pattern;
+    const node = pattern as { type?: string; enumName?: string | null; name?: string; fields?: unknown[]; patterns?: unknown[] };
+    switch (node.type) {
+      case 'EnumPattern':
+        if (node.enumName) {
+          if (!scope.types.has(node.enumName) && renameMap.has(node.enumName)) {
+            node.enumName = renameMap.get(node.enumName) ?? node.enumName;
+          } else if (!scope.values.has(node.enumName) && namespaceAliases.has(node.enumName)) {
+            const replacement = namespaceAliases.get(node.enumName);
+            node.enumName = replacement ?? null;
+          }
+        }
+        if (Array.isArray(node.patterns)) {
+          node.patterns = node.patterns.map((child) => rewritePattern(child, scope));
+        }
+        return node;
+      case 'TuplePattern':
+        if (Array.isArray((node as { elements?: unknown[] }).elements)) {
+          (node as { elements: unknown[] }).elements = (node as { elements: unknown[] }).elements.map((child) =>
+            rewritePattern(child, scope)
+          );
+        }
+        return node;
+      case 'StructPattern':
+        if (typeof node.name === 'string' && !scope.types.has(node.name) && renameMap.has(node.name)) {
+          node.name = renameMap.get(node.name) ?? node.name;
+        }
+        if (Array.isArray(node.fields)) {
+          node.fields = node.fields.map((field) => ({
+            ...(field as Record<string, unknown>),
+            pattern: rewritePattern((field as { pattern?: unknown }).pattern, scope),
+          }));
+        }
+        return node;
+      default:
+        return node;
+    }
+  };
+
+  const rewriteExpr = (expr: unknown, scope: RewriteScopeLite): unknown => {
     if (!expr || typeof expr !== 'object') return expr;
     const node = expr as { type?: string; [key: string]: unknown };
     switch (node.type) {
       case 'Identifier': {
         const name = node.name as string | undefined;
-        if (name && renameMap.has(name)) node.name = renameMap.get(name);
+        if (name && !scope.values.has(name) && renameMap.has(name)) {
+          node.name = renameMap.get(name);
+        }
         return node;
       }
       case 'Call': {
         const enumName = node.enumName as string | null | undefined;
         if (enumName) {
-          if (renameMap.has(enumName)) {
+          if (!scope.types.has(enumName) && renameMap.has(enumName)) {
             node.enumName = renameMap.get(enumName);
-          } else if (namespaceAliases.has(enumName)) {
+          } else if (!scope.values.has(enumName) && namespaceAliases.has(enumName)) {
             const replacement = namespaceAliases.get(enumName);
             node.enumName = replacement ?? null;
           }
         }
         const callee = node.callee as { name?: string } | undefined;
-        if (callee?.name && renameMap.has(callee.name)) {
+        if (callee?.name && !scope.values.has(callee.name) && renameMap.has(callee.name)) {
           callee.name = renameMap.get(callee.name);
+        }
+        if (Array.isArray(node.typeArgs)) {
+          node.typeArgs = node.typeArgs.map((arg) => rewriteTypeNameLiteScoped(arg, renameMap, scope.types));
+        }
+        if (node.receiver) {
+          node.receiver = rewriteExpr(node.receiver, scope);
         }
         if (Array.isArray(node.args)) {
           node.args = node.args.map((arg) => {
             if (arg && typeof arg === 'object' && 'value' in (arg as { value?: unknown })) {
               return {
                 ...(arg as Record<string, unknown>),
-                value: rewriteExpr((arg as { value?: unknown }).value),
+                value: rewriteExpr((arg as { value?: unknown }).value, scope),
               };
             }
-            return rewriteExpr(arg);
+            return rewriteExpr(arg, scope);
           });
         }
         return node;
       }
       case 'Member': {
         const object = node.object as { type?: string; name?: string } | undefined;
-        if (object?.type === 'Identifier' && object.name && namespaceAliases.has(object.name)) {
+        if (
+          object?.type === 'Identifier' &&
+          object.name &&
+          !scope.values.has(object.name) &&
+          namespaceAliases.has(object.name)
+        ) {
           const replacement = namespaceAliases.get(object.name);
           if (replacement) {
             object.name = replacement;
@@ -840,86 +1014,204 @@ function rewriteProgramImports(
           const memberMap = namespaceMemberRenames.get(object.name);
           return makeIdentifier(memberMap?.get(propertyName) ?? propertyName, node.location);
         }
-        node.object = rewriteExpr(node.object);
+        node.object = rewriteExpr(node.object, scope);
         return node;
       }
       case 'Binary':
-        node.left = rewriteExpr(node.left);
-        node.right = rewriteExpr(node.right);
+        node.left = rewriteExpr(node.left, scope);
+        node.right = rewriteExpr(node.right, scope);
         return node;
       case 'ArrayLiteral':
         if (Array.isArray(node.elements)) {
-          node.elements = node.elements.map((element) => rewriteExpr(element));
+          node.elements = node.elements.map((element) => rewriteExpr(element, scope));
         }
+        return node;
+      case 'ArrayRepeatLiteral':
+        node.value = rewriteExpr(node.value, scope);
+        node.count = rewriteExpr(node.count, scope);
         return node;
       case 'Lambda':
-        if (Array.isArray(node.params)) {
-          node.params = node.params.map((param: { typeName?: unknown }) => ({
-            ...param,
-            typeName: rewriteTypeNameLite(param.typeName, renameMap),
-          }));
+      case 'FnExpr': {
+        let lambdaScope = scope;
+        if (Array.isArray(node.typeParams)) {
+          const rewrittenTypeParams = rewriteTypeParamsLite(node.typeParams, lambdaScope, renameMap);
+          node.typeParams = rewrittenTypeParams.typeParams as never;
+          lambdaScope = rewrittenTypeParams.scope;
         }
-        node.returnType = rewriteTypeNameLite(node.returnType, renameMap);
-        node.body = rewriteStmt(node.body, false);
+        if (Array.isArray(node.params)) {
+          node.params = node.params.map((param: { name?: unknown; typeName?: unknown; defaultValue?: unknown }) => {
+            const rewritten = {
+              ...param,
+              typeName: rewriteTypeNameLiteScoped(param.typeName, renameMap, lambdaScope.types),
+              defaultValue:
+                'defaultValue' in param ? rewriteExpr(param.defaultValue, lambdaScope) : param.defaultValue,
+            };
+            if (typeof param.name === 'string') {
+              lambdaScope = extendValueScopeLite(lambdaScope, [param.name], renameMap, namespaceAliases);
+            }
+            return rewritten;
+          });
+        }
+        node.returnType = rewriteTypeNameLiteScoped(node.returnType, renameMap, lambdaScope.types);
+        node.body = rewriteStmt(node.body, false, lambdaScope);
         return node;
+      }
       case 'Move':
-        node.target = rewriteExpr(node.target);
+        node.target = rewriteExpr(node.target, scope);
+        return node;
+      case 'Await':
+      case 'Try':
+        node.value = rewriteExpr(node.value, scope);
+        return node;
+      case 'Cast':
+        node.expr = rewriteExpr(node.expr, scope);
+        node.targetType = rewriteTypeNameLiteScoped(node.targetType, renameMap, scope.types);
         return node;
       case 'StructLiteral': {
         const name = node.name as string | undefined;
-        if (name && renameMap.has(name)) node.name = renameMap.get(name);
+        if (name && !scope.types.has(name) && renameMap.has(name)) {
+          node.name = renameMap.get(name);
+        }
+        if (Array.isArray(node.typeArgs)) {
+          node.typeArgs = node.typeArgs.map((arg) => rewriteTypeNameLiteScoped(arg, renameMap, scope.types));
+        }
         if (Array.isArray(node.fields)) {
           node.fields = node.fields.map((field: { value?: unknown }) => ({
             ...field,
-            value: rewriteExpr(field.value),
+            value: rewriteExpr(field.value, scope),
           }));
         }
         return node;
       }
       case 'MatchExpr': {
-        node.value = rewriteExpr(node.value);
+        node.value = rewriteExpr(node.value, scope);
         if (Array.isArray(node.arms)) {
-          node.arms = node.arms.map((arm: { pattern?: unknown; body?: unknown }) => ({
-            ...arm,
-            pattern: rewritePattern(arm.pattern),
-            body: rewriteExpr(arm.body),
-          }));
+          node.arms = node.arms.map((arm: { pattern?: unknown; guard?: unknown; body?: unknown }) => {
+            const pattern = rewritePattern(arm.pattern, scope);
+            const armScope = extendValueScopeLite(
+              scope,
+              collectPatternBindingsLite(pattern),
+              renameMap,
+              namespaceAliases
+            );
+            return {
+              ...arm,
+              pattern,
+              guard: rewriteExpr(arm.guard, armScope),
+              body: rewriteExpr(arm.body, armScope),
+            };
+          });
         }
         return node;
       }
       case 'IsExpr': {
         const enumName = node.enumName as string | null | undefined;
         if (enumName) {
-          if (renameMap.has(enumName)) {
+          if (!scope.types.has(enumName) && renameMap.has(enumName)) {
             node.enumName = renameMap.get(enumName);
-          } else if (namespaceAliases.has(enumName)) {
+          } else if (!scope.values.has(enumName) && namespaceAliases.has(enumName)) {
             const replacement = namespaceAliases.get(enumName);
             node.enumName = replacement ?? null;
           }
         }
-        node.value = rewriteExpr(node.value);
+        node.value = rewriteExpr(node.value, scope);
         return node;
       }
+      case 'InterpolatedString':
+        if (Array.isArray(node.parts)) {
+          node.parts = node.parts.map((part) => (typeof part === 'string' ? part : rewriteExpr(part, scope)));
+        }
+        return node;
+      case 'TupleLiteral':
+        if (Array.isArray(node.elements)) {
+          node.elements = node.elements.map((element) => rewriteExpr(element, scope));
+        }
+        return node;
+      case 'Index':
+        node.object = rewriteExpr(node.object, scope);
+        node.index = rewriteExpr(node.index, scope);
+        return node;
+      case 'Range':
+        node.start = rewriteExpr(node.start, scope);
+        node.end = rewriteExpr(node.end, scope);
+        return node;
+      case 'SelectExpr':
+        if (Array.isArray(node.arms)) {
+          node.arms = node.arms.map((arm: { binding?: unknown; value?: unknown; body?: unknown }) => {
+            const armScope =
+              typeof arm.binding === 'string'
+                ? extendValueScopeLite(scope, [arm.binding], renameMap, namespaceAliases)
+                : scope;
+            return {
+              ...arm,
+              value: rewriteExpr(arm.value, scope),
+              body: rewriteExpr(arm.body, armScope),
+            };
+          });
+        }
+        return node;
+      case 'ListComprehension': {
+        node.source = rewriteExpr(node.source, scope);
+        let comprehensionScope = extendValueScopeLite(scope, [String(node.binding ?? '')], renameMap, namespaceAliases);
+        if (node.source2) {
+          node.source2 = rewriteExpr(node.source2, comprehensionScope);
+        }
+        if (typeof node.binding2 === 'string') {
+          comprehensionScope = extendValueScopeLite(
+            comprehensionScope,
+            [node.binding2],
+            renameMap,
+            namespaceAliases
+          );
+        }
+        node.filter = rewriteExpr(node.filter, comprehensionScope);
+        node.body = rewriteExpr(node.body, comprehensionScope);
+        return node;
+      }
+      case 'MacroInvoke':
+        if (Array.isArray(node.args)) {
+          node.args = node.args.map((arg) => rewriteExpr(arg, scope));
+        }
+        return node;
       default:
         return node;
     }
   };
 
-  const rewritePattern = (pattern: unknown): unknown => {
-    if (!pattern || typeof pattern !== 'object') return pattern;
-    const node = pattern as { type?: string; enumName?: string | null };
-    if (node.type === 'EnumPattern' && node.enumName) {
-      if (renameMap.has(node.enumName)) {
-        node.enumName = renameMap.get(node.enumName) ?? node.enumName;
-      } else if (namespaceAliases.has(node.enumName)) {
-        const replacement = namespaceAliases.get(node.enumName);
-        node.enumName = replacement ?? null;
-      }
+  const extendScopeForStmt = (scope: RewriteScopeLite, stmt: unknown): RewriteScopeLite => {
+    if (!stmt || typeof stmt !== 'object') return scope;
+    const node = stmt as { type?: string; name?: string; names?: unknown[]; pattern?: unknown };
+    switch (node.type) {
+      case 'Let':
+        return typeof node.name === 'string'
+          ? extendValueScopeLite(scope, [node.name], renameMap, namespaceAliases)
+          : scope;
+      case 'LetTuple':
+        return Array.isArray(node.names)
+          ? extendValueScopeLite(
+              scope,
+              node.names.filter((name): name is string => typeof name === 'string'),
+              renameMap,
+              namespaceAliases
+            )
+          : scope;
+      case 'LetElse':
+        return extendValueScopeLite(
+          scope,
+          collectPatternBindingsLite(node.pattern),
+          renameMap,
+          namespaceAliases
+        );
+      case 'FnDecl':
+        return typeof node.name === 'string'
+          ? extendValueScopeLite(scope, [node.name], renameMap, namespaceAliases)
+          : scope;
+      default:
+        return scope;
     }
-    return node;
   };
 
-  const rewriteStmt = (stmt: unknown, isTopLevel: boolean): unknown => {
+  const rewriteStmt = (stmt: unknown, isTopLevel: boolean, scope: RewriteScopeLite): unknown => {
     if (!stmt || typeof stmt !== 'object') return stmt;
     const node = stmt as { type?: string; [key: string]: unknown };
     if (isTopLevel && typeof node.name === 'string' && renameMap.has(node.name)) {
@@ -927,105 +1219,176 @@ function rewriteProgramImports(
     }
     switch (node.type) {
       case 'FnDecl': {
-        if (Array.isArray(node.params)) {
-          node.params = node.params.map((param: { typeName?: unknown }) => ({
-            ...param,
-            typeName: rewriteTypeNameLite(param.typeName, renameMap),
-          }));
-        }
-        node.returnType = rewriteTypeNameLite(node.returnType, renameMap);
+        let bodyScope = scope;
         if (Array.isArray(node.typeParams)) {
-          node.typeParams = node.typeParams.map((param: { bound?: unknown[] }) => ({
-            ...param,
-            bound: Array.isArray(param.bound)
-              ? param.bound.map((bound) => rewriteTypeNameLite(bound, renameMap))
-              : param.bound,
-          }));
+          const rewrittenTypeParams = rewriteTypeParamsLite(node.typeParams, bodyScope, renameMap);
+          node.typeParams = rewrittenTypeParams.typeParams as never;
+          bodyScope = rewrittenTypeParams.scope;
         }
-        node.body = rewriteStmt(node.body, false);
+        if (Array.isArray(node.params)) {
+          node.params = node.params.map((param: { name?: unknown; typeName?: unknown; defaultValue?: unknown }) => {
+            const rewritten = {
+              ...param,
+              typeName: rewriteTypeNameLiteScoped(param.typeName, renameMap, bodyScope.types),
+              defaultValue:
+                'defaultValue' in param ? rewriteExpr(param.defaultValue, bodyScope) : param.defaultValue,
+            };
+            if (typeof param.name === 'string') {
+              bodyScope = extendValueScopeLite(bodyScope, [param.name], renameMap, namespaceAliases);
+            }
+            return rewritten;
+          });
+        }
+        if (!isTopLevel && typeof node.name === 'string') {
+          bodyScope = extendValueScopeLite(bodyScope, [node.name], renameMap, namespaceAliases);
+        }
+        node.returnType = rewriteTypeNameLiteScoped(node.returnType, renameMap, bodyScope.types);
+        node.whereTypeBounds = rewriteWhereTypeBounds(node.whereTypeBounds, bodyScope);
+        node.body = rewriteStmt(node.body, false, bodyScope);
         return node;
       }
       case 'Let':
-        node.typeName = rewriteTypeNameLite(node.typeName, renameMap);
-        node.value = rewriteExpr(node.value);
+        node.typeName = rewriteTypeNameLiteScoped(node.typeName, renameMap, scope.types);
+        node.value = rewriteExpr(node.value, scope);
+        return node;
+      case 'LetTuple':
+        node.value = rewriteExpr(node.value, scope);
+        return node;
+      case 'LetElse':
+        node.pattern = rewritePattern(node.pattern, scope);
+        node.value = rewriteExpr(node.value, scope);
+        node.elseBlock = rewriteStmt(node.elseBlock, false, scope);
         return node;
       case 'Return':
-        node.value = rewriteExpr(node.value);
+        node.value = rewriteExpr(node.value, scope);
         return node;
       case 'Assign':
-        node.target = rewriteExpr(node.target);
-        node.value = rewriteExpr(node.value);
+        node.target = rewriteExpr(node.target, scope);
+        node.value = rewriteExpr(node.value, scope);
         return node;
       case 'ExprStmt':
-        node.expr = rewriteExpr(node.expr);
+        node.expr = rewriteExpr(node.expr, scope);
         return node;
       case 'If':
-        node.condition = rewriteExpr(node.condition);
-        node.thenBlock = rewriteStmt(node.thenBlock, false);
-        if (node.elseBlock) node.elseBlock = rewriteStmt(node.elseBlock, false);
+        node.condition = rewriteExpr(node.condition, scope);
+        node.thenBlock = rewriteStmt(node.thenBlock, false, scope);
+        if (node.elseBlock) node.elseBlock = rewriteStmt(node.elseBlock, false, scope);
         return node;
+      case 'IfLet': {
+        const pattern = rewritePattern(node.pattern, scope);
+        const thenScope = extendValueScopeLite(
+          scope,
+          collectPatternBindingsLite(pattern),
+          renameMap,
+          namespaceAliases
+        );
+        node.pattern = pattern;
+        node.value = rewriteExpr(node.value, scope);
+        node.thenBlock = rewriteStmt(node.thenBlock, false, thenScope);
+        if (node.elseBlock) node.elseBlock = rewriteStmt(node.elseBlock, false, scope);
+        return node;
+      }
       case 'While':
-        node.condition = rewriteExpr(node.condition);
-        node.body = rewriteStmt(node.body, false);
+        node.condition = rewriteExpr(node.condition, scope);
+        node.body = rewriteStmt(node.body, false, scope);
         return node;
+      case 'WhileLet': {
+        const pattern = rewritePattern(node.pattern, scope);
+        const bodyScope = extendValueScopeLite(
+          scope,
+          collectPatternBindingsLite(pattern),
+          renameMap,
+          namespaceAliases
+        );
+        node.pattern = pattern;
+        node.value = rewriteExpr(node.value, scope);
+        node.body = rewriteStmt(node.body, false, bodyScope);
+        return node;
+      }
+      case 'For': {
+        node.iterable = rewriteExpr(node.iterable, scope);
+        const bodyScope =
+          typeof node.iterator === 'string'
+            ? extendValueScopeLite(scope, [node.iterator], renameMap, namespaceAliases)
+            : scope;
+        node.body = rewriteStmt(node.body, false, bodyScope);
+        return node;
+      }
       case 'MatchStmt':
-        node.value = rewriteExpr(node.value);
+        node.value = rewriteExpr(node.value, scope);
         if (Array.isArray(node.arms)) {
-          node.arms = node.arms.map((arm: { pattern?: unknown; body?: unknown }) => ({
-            ...arm,
-            pattern: rewritePattern(arm.pattern),
-            body: rewriteStmt(arm.body, false),
-          }));
+          node.arms = node.arms.map((arm: { pattern?: unknown; guard?: unknown; body?: unknown }) => {
+            const pattern = rewritePattern(arm.pattern, scope);
+            const armScope = extendValueScopeLite(
+              scope,
+              collectPatternBindingsLite(pattern),
+              renameMap,
+              namespaceAliases
+            );
+            return {
+              ...arm,
+              pattern,
+              guard: rewriteExpr(arm.guard, armScope),
+              body: rewriteStmt(arm.body, false, armScope),
+            };
+          });
         }
         return node;
       case 'Block':
-        if (Array.isArray(node.body)) node.body = node.body.map((child) => rewriteStmt(child, false));
+        if (Array.isArray(node.body)) {
+          let blockScope = scope;
+          node.body = node.body.map((child) => {
+            const rewritten = rewriteStmt(child, false, blockScope);
+            blockScope = extendScopeForStmt(blockScope, child);
+            return rewritten;
+          });
+        }
         return node;
       case 'StructDecl':
       case 'TypeDecl': {
+        let typeScope = scope;
+        if (Array.isArray(node.typeParams)) {
+          const rewrittenTypeParams = rewriteTypeParamsLite(node.typeParams, typeScope, renameMap);
+          node.typeParams = rewrittenTypeParams.typeParams as never;
+          typeScope = rewrittenTypeParams.scope;
+        }
+        if (node.aliasType !== undefined) {
+          node.aliasType = rewriteTypeNameLiteScoped(node.aliasType, renameMap, typeScope.types);
+        }
         if (Array.isArray(node.body)) {
           node.body = node.body.map((field: { typeName?: unknown }) => ({
             ...field,
-            typeName: rewriteTypeNameLite(field.typeName, renameMap),
-          }));
-        }
-        if (Array.isArray(node.typeParams)) {
-          node.typeParams = node.typeParams.map((param: { bound?: unknown[] }) => ({
-            ...param,
-            bound: Array.isArray(param.bound)
-              ? param.bound.map((bound) => rewriteTypeNameLite(bound, renameMap))
-              : param.bound,
+            typeName: rewriteTypeNameLiteScoped(field.typeName, renameMap, typeScope.types),
           }));
         }
         return node;
       }
       case 'EnumDecl': {
+        let typeScope = scope;
+        if (Array.isArray(node.typeParams)) {
+          const rewrittenTypeParams = rewriteTypeParamsLite(node.typeParams, typeScope, renameMap);
+          node.typeParams = rewrittenTypeParams.typeParams as never;
+          typeScope = rewrittenTypeParams.scope;
+        }
         if (Array.isArray(node.variants)) {
           node.variants = node.variants.map((variant: { params?: unknown[] }) => ({
             ...variant,
             params: Array.isArray(variant.params)
-              ? variant.params.map((param) => rewriteTypeNameLite(param, renameMap))
+              ? variant.params.map((param) => rewriteTypeNameLiteScoped(param, renameMap, typeScope.types))
               : variant.params,
-          }));
-        }
-        if (Array.isArray(node.typeParams)) {
-          node.typeParams = node.typeParams.map((param: { bound?: unknown[] }) => ({
-            ...param,
-            bound: Array.isArray(param.bound)
-              ? param.bound.map((bound) => rewriteTypeNameLite(bound, renameMap))
-              : param.bound,
           }));
         }
         return node;
       }
       case 'StructLiteral':
       case 'MatchExpr':
-        return rewriteExpr(node);
+        return rewriteExpr(node, scope);
       default:
         return node;
     }
   };
 
+  const rootScope = createRewriteScopeLite();
   const body = Array.isArray(program.body)
     ? program.body
         .filter((stmt) => {
@@ -1034,7 +1397,7 @@ function rewriteProgramImports(
           const source = node.source?.value ?? '';
           return !resolvedImports.has(source);
         })
-        .map((stmt) => rewriteStmt(stmt, true))
+        .map((stmt) => rewriteStmt(stmt, true, rootScope))
     : [];
 
   return { type: 'Program', body, location: (program as { location?: unknown }).location };

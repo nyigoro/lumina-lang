@@ -1,29 +1,55 @@
 import { render } from '../src/lumina-runtime.js';
 
+type FakeNodeList<T> = ArrayLike<T> & Iterable<T>;
+
+const createNodeListView = <T>(items: readonly T[]): FakeNodeList<T> => {
+  const view: Record<number, T> & {
+    length: number;
+    item: (index: number) => T | null;
+    [Symbol.iterator]: () => Iterator<T>;
+  } = {
+    length: items.length,
+    item: (index: number) => items[index] ?? null,
+    [Symbol.iterator]: function* (): Iterator<T> {
+      yield* items;
+    },
+  };
+
+  items.forEach((item, index) => {
+    view[index] = item;
+  });
+
+  return view as FakeNodeList<T>;
+};
+
 class FakeNode {
   textContent: string | null = '';
-  childNodes: FakeNode[] = [];
+  private readonly nodes: FakeNode[] = [];
   parentNode: FakeNode | null = null;
+
+  get childNodes(): FakeNodeList<FakeNode> {
+    return createNodeListView(this.nodes);
+  }
 
   appendChild(node: FakeNode): FakeNode {
     node.parentNode = this;
-    this.childNodes.push(node);
+    this.nodes.push(node);
     return node;
   }
 
   removeChild(node: FakeNode): FakeNode {
-    const idx = this.childNodes.indexOf(node);
+    const idx = this.nodes.indexOf(node);
     if (idx >= 0) {
-      this.childNodes.splice(idx, 1);
+      this.nodes.splice(idx, 1);
       node.parentNode = null;
     }
     return node;
   }
 
   replaceChild(newChild: FakeNode, oldChild: FakeNode): FakeNode {
-    const idx = this.childNodes.indexOf(oldChild);
+    const idx = this.nodes.indexOf(oldChild);
     if (idx >= 0) {
-      this.childNodes[idx] = newChild;
+      this.nodes[idx] = newChild;
       oldChild.parentNode = null;
       newChild.parentNode = this;
     }

@@ -752,7 +752,7 @@ describe('macro expansion matrix: module visibility and order', () => {
       },
       ({ ok, output }) => {
         expect(ok).toBe(true);
-        expect(output).toMatch(/\n\s*7;\s*\n/);
+        expect(output).toMatch(/return 7;/);
       }
     );
   });
@@ -777,7 +777,7 @@ describe('macro expansion matrix: module visibility and order', () => {
       },
       ({ ok, output }) => {
         expect(ok).toBe(true);
-        expect(output).toMatch(/\n\s*5;\s*\n/);
+        expect(output).toMatch(/return 5;/);
       }
     );
   });
@@ -805,7 +805,30 @@ describe('macro expansion matrix: module visibility and order', () => {
       },
       ({ ok, output }) => {
         expect(ok).toBe(true);
-        expect(output).toMatch(/\n\s*2;\s*\n/);
+        expect(output).toMatch(/return 2;/);
+      }
+    );
+  });
+
+  it('D06 bundled renames do not capture shadowing locals', async () => {
+    await createTempProject(
+      {
+        'dep.lm': `
+          fn helper() -> i32 { 9 }
+        `,
+        'main.lm': `
+          import { helper } from "./dep.lm";
+          fn main() -> i32 {
+            let helper = 1;
+            helper
+          }
+        `,
+      },
+      ({ ok, output }) => {
+        expect(ok).toBe(true);
+        expect(output).toMatch(/const helper = 1;/);
+        expect(output).toMatch(/return helper;/);
+        expect(output).not.toMatch(/return __lumina_bundle_\d+_helper;/);
       }
     );
   });
