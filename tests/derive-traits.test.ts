@@ -266,8 +266,8 @@ describe('derive integration with trait system', () => {
       });
       expect(result.ok).toBe(true);
       const output = fs.readFileSync(outPath, 'utf-8');
-      expect(output).toContain('Clone$Point$clone');
-      expect(output).toContain('Clone$Point$clone(p)');
+      expect(output).toMatch(/Clone\$(?:lumina_bundle_\d+_)?Point\$clone/);
+      expect(output).toMatch(/Clone\$(?:lumina_bundle_\d+_)?Point\$clone\(p\)/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
