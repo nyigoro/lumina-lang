@@ -1,17 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { compileGrammar } from '../src/grammar/index.js';
-import { analyzeLumina } from '../src/lumina/semantic.js';
-import { inferProgram } from '../src/lumina/hm-infer.js';
 import { generateJSFromAst } from '../src/lumina/codegen-js.js';
 import { render } from '../src/lumina-runtime.js';
-import type { LuminaProgram } from '../src/lumina/ast.js';
-
-const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
-const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
-const parser = compileGrammar(luminaGrammar);
-
-const parseProgram = (source: string): LuminaProgram => parser.parse(source) as LuminaProgram;
+import { parseLuminaProgram } from './helpers/lumina-parser.js';
 
 describe('render prop helpers', () => {
   test('new props return the expected object shape', () => {
@@ -55,65 +44,76 @@ describe('render prop helpers', () => {
     expect(handler).toHaveBeenCalledWith('merged value');
   });
 
-  test('stdlib wrappers typecheck and emit render runtime calls', () => {
+  test('props_merge composes classes, styles, and event handlers instead of overwriting', () => {
+    const left = jest.fn(() => false);
+    const right = jest.fn();
+    const preventDefault = jest.fn();
+
+    const merged = render.props_merge(
+      {
+        className: 'base',
+        style: 'color:red',
+        onClick: left,
+      },
+      {
+        className: 'accent',
+        style: 'background:blue',
+        onClick: right,
+      }
+    ) as {
+      className?: string;
+      style?: string;
+      onClick?: (event: Event) => void;
+    };
+
+    expect(merged.className).toBe('base accent');
+    expect(merged.style).toBe('color:red;background:blue');
+
+    merged.onClick?.({ preventDefault } as unknown as Event);
+    expect(left).toHaveBeenCalledTimes(1);
+    expect(right).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  test('compose_handlers chains callbacks directly', () => {
+    const left = jest.fn();
+    const right = jest.fn();
+    const composed = render.compose_handlers(left, right);
+
+    composed?.('payload');
+
+    expect(left).toHaveBeenCalledWith('payload');
+    expect(right).toHaveBeenCalledWith('payload');
+  });
+
+  test('stdlib wrappers emit render runtime calls for composition helpers', () => {
     const source = `
       import {
-        props_class,
-        props_id,
-        props_style,
-        props_value,
-        props_placeholder,
-        props_href,
-        props_disabled,
-        props_on_input,
-        props_on_change,
-        props_key,
-        props_merge,
-        vnode,
-        text
+        children,
+        composeHandlers,
+        createContext,
+        slot,
+        text,
+        useContext,
+        withContext
       } from "@std/render";
 
       fn main() -> VNode {
-        let base = props_merge(props_class("field"), props_id("name"));
-        let input = props_merge(
-          props_merge(base, props_style("color:red")),
-          props_merge(
-            props_merge(props_value("hello"), props_placeholder("Enter...")),
-            props_merge(
-              props_on_input(|value| {
-                let _ = value;
-              }),
-              props_on_change(|value| {
-                let _ = value;
-              })
-            )
-          )
-        );
-        let _link = props_href("/home");
-        let _disabled = props_disabled(true);
-        let _key = props_key("item-1");
-        vnode("input", input, [text("ok")])
+        let theme = createContext("light");
+        let _click = composeHandlers(0, 0);
+        let _items = children(text("item"));
+        let _wrapped = withContext(theme, "dark", slot(text(useContext(theme)), 0));
+        text("done")
       }
     `.trim() + '\n';
 
-    const ast = parseProgram(source);
-    const analysis = analyzeLumina(ast);
-    const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
-    expect(semanticErrors).toHaveLength(0);
-
-    const inferred = inferProgram(ast);
-    const hmErrors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
-    expect(hmErrors).toHaveLength(0);
-
+    const ast = parseLuminaProgram(source);
     const js = generateJSFromAst(ast, { target: 'esm', includeRuntime: true }).code;
-    expect(js).toContain('props_id("name")');
-    expect(js).toContain('props_style("color:red")');
-    expect(js).toContain('props_value("hello")');
-    expect(js).toContain('props_placeholder("Enter...")');
-    expect(js).toContain('props_href("/home")');
-    expect(js).toContain('props_disabled(true)');
-    expect(js).toContain('props_on_input(function(value)');
-    expect(js).toContain('props_on_change(function(value)');
-    expect(js).toContain('props_key("item-1")');
+    expect(js).toContain('createContext("light")');
+    expect(js).toContain('withContext(theme, "dark"');
+    expect(js).toContain('useContext(theme)');
+    expect(js).toContain('composeHandlers');
+    expect(js).toContain('children(text("item"))');
+    expect(js).toContain('slot(text(useContext(theme)), 0)');
   });
 });

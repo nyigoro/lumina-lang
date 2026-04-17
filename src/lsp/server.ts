@@ -126,7 +126,7 @@ function initProjectContext() {
   rebuildVaultModuleRegistry();
   const grammarPath = resolveGrammarPath();
   const grammarText = fs.readFileSync(grammarPath, 'utf-8');
-  const parser = compileGrammar(grammarText);
+const parser = compileGrammar(grammarText, { cache: true });
   project = new ProjectContext(parser, undefined, undefined, {
     useHmDiagnostics: settings.useHmDiagnostics ?? false,
     moduleRegistry,

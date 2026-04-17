@@ -507,21 +507,36 @@ class JSGenerator {
     this.builder.append('\n');
     this.indentLevel++;
     if (usesTry) {
-      this.builder.append(`${this.pad()}try `);
-      this.emitBlock(stmt.body, { inline: true, trailingNewline: false });
-      this.builder.append(` catch (err) {\n`);
+      this.builder.append(`${this.pad()}try {\n`);
+      this.indentLevel++;
+      this.emitFunctionBodyStatements(stmt.body);
+      this.indentLevel--;
+      this.builder.append(`${this.pad()}} catch (err) {\n`);
       this.indentLevel++;
       this.builder.append(`${this.pad()}if (err && err.__lumina_try) return err.value;\n`);
       this.builder.append(`${this.pad()}throw err;\n`);
       this.indentLevel--;
       this.builder.append(`${this.pad()}}\n`);
     } else {
-      for (const bodyStmt of stmt.body.body) {
-        this.emitStatement(bodyStmt);
-      }
+      this.emitFunctionBodyStatements(stmt.body);
     }
     this.indentLevel--;
     this.builder.append(`${pad}}\n`);
+  }
+
+  private emitFunctionBodyStatements(block: { body: LuminaStatement[] }): void {
+    const lastIdx = block.body.length - 1;
+    block.body.forEach((stmt, idx) => {
+      const isTailExpr = idx === lastIdx && this.isExpressionStatement(stmt);
+      if (isTailExpr) {
+        const expr = (stmt as Extract<LuminaStatement, { type: 'ExprStmt' }>).expr;
+        this.builder.append(`${this.pad()}return `);
+        this.builder.appendExpr(this.emitExpr(expr));
+        this.builder.append(';\n');
+        return;
+      }
+      this.emitStatement(stmt);
+    });
   }
 
   private emitImplDecl(stmt: LuminaImplDecl): void {
@@ -1117,9 +1132,7 @@ class JSGenerator {
       traitMethodResolutions: this.traitMethodResolutions,
     });
     tempGenerator.indentLevel = 1;
-    for (const stmt of block.body) {
-      tempGenerator.emitStatement(stmt);
-    }
+    tempGenerator.emitFunctionBodyStatements(block);
     const rendered = tempBuilder.toString();
     return rendered.endsWith('\n') ? rendered : `${rendered}\n`;
   }

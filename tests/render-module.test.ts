@@ -1,16 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { compileGrammar } from '../src/grammar/index.js';
 import { analyzeLumina } from '../src/lumina/semantic.js';
 import { inferProgram } from '../src/lumina/hm-infer.js';
 import { generateJSFromAst } from '../src/lumina/codegen-js.js';
-import type { LuminaProgram } from '../src/lumina/ast.js';
-
-const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
-const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
-const parser = compileGrammar(luminaGrammar);
-
-const parseProgram = (source: string): LuminaProgram => parser.parse(source) as LuminaProgram;
+import { parseLuminaProgram } from './helpers/lumina-parser.js';
 
 describe('@std/render module', () => {
   it('typechecks signal/memo/effect usage', () => {
@@ -43,7 +34,7 @@ describe('@std/render module', () => {
       }
     `.trim() + '\n';
 
-    const ast = parseProgram(source);
+    const ast = parseLuminaProgram(source);
     const analysis = analyzeLumina(ast);
     const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
     expect(semanticErrors).toHaveLength(0);
@@ -63,7 +54,7 @@ describe('@std/render module', () => {
       }
     `.trim() + '\n';
 
-    const ast = parseProgram(source);
+    const ast = parseLuminaProgram(source);
     const js = generateJSFromAst(ast, { target: 'esm', includeRuntime: true }).code;
     expect(js).toContain('render.signal');
     expect(js).toContain('render.set');
@@ -95,7 +86,7 @@ describe('@std/render module', () => {
       }
     `.trim() + '\n';
 
-    const ast = parseProgram(source);
+    const ast = parseLuminaProgram(source);
     const analysis = analyzeLumina(ast);
     const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
     expect(semanticErrors).toHaveLength(0);
@@ -108,5 +99,56 @@ describe('@std/render module', () => {
     expect(js).toContain('createSignal');
     expect(js).toContain('mount_reactive');
     expect(js).toContain('createDomRenderer');
+  });
+
+  it('typechecks the component/context/headless render namespace surface', () => {
+    const source = `
+      import { render } from "@std";
+
+      fn build(active: Signal<string>, open: Signal<bool>) -> VNode {
+        let _context = render.create_required_context();
+        let _children = render.children([render.text("child")]);
+        let _slot = render.slot_or(0, 0, render.text("fallback"));
+
+        let tabs = render.tabsRoot(active, || [
+          render.tabsList(render.props_class("tabs"), || [
+            render.tabsTrigger("overview", render.props_class("tab"), [render.text("Overview")])
+          ]),
+          render.tabsPanel("overview", render.props_class("panel"), [render.text("Panel")])
+        ]);
+
+        let dialog = render.dialogRoot(open, || render.dialogPortal([
+          render.dialogOverlay(render.props_class("overlay")),
+          render.dialogContent(render.props_class("content"), [
+            render.dialogTitle(render.props_class("title"), [render.text("Dialog")]),
+            render.dialogDescription(render.props_class("description"), [render.text("Details")]),
+            render.dialogClose(render.props_class("close"), [render.text("Close")])
+          ])
+        ]));
+
+        let popover = render.popoverRoot(open, || [
+          render.popoverTrigger(render.props_class("trigger"), [render.text("Open popover")]),
+          render.popoverPortal([
+            render.popoverContent(render.props_class("popover"), [render.text("Popover body")])
+          ])
+        ]);
+
+        let menu = render.menuRoot(open, || [
+          render.menuTrigger(render.props_class("menu-trigger"), [render.text("Open menu")]),
+          render.menuPortal([
+            render.menuContent(render.props_class("menu"), [
+              render.menuItem("rename", render.props_class("menu-item"), [render.text("Rename")])
+            ])
+          ])
+        ]);
+
+        render.portalBody([tabs, dialog, popover, menu])
+      }
+    `.trim() + '\n';
+
+    const ast = parseLuminaProgram(source);
+    const analysis = analyzeLumina(ast);
+    const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(semanticErrors).toHaveLength(0);
   });
 });

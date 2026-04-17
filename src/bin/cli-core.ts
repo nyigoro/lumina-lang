@@ -614,7 +614,7 @@ export async function runParsergen(args: string[], options?: { deprecate?: boole
     // Lumina pipeline (parse -> analyze -> lower -> optimize -> codegen)
     if (config.luminaBuild) {
       try {
-        const luminaParser = compileGrammar(grammarText, { optimize: config.optimize });
+        const luminaParser = compileGrammar(grammarText, { optimize: config.optimize, cache: true });
         const source = await fs.readFile(config.luminaBuild, 'utf-8');
         const parsed = parseInput(luminaParser, source);
         if (ParserUtils.isParseError(parsed)) {

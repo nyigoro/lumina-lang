@@ -135,4 +135,22 @@ describe('runtime render module', () => {
       (globalThis as { document?: unknown }).document = prevDoc;
     }
   });
+
+  test('context tokens and composition helpers work outside DOM patching', () => {
+    const theme = render.create_context('light');
+    expect(theme.defaultValue).toBe('light');
+    expect(theme.hasDefault).toBe(true);
+
+    const normalized = render.children(() => [render.text('a'), render.text('b')]);
+    expect(normalized).toHaveLength(2);
+    expect(normalized[0]?.text).toBe('a');
+
+    const slotted = render.slot(({ label }: { label: string }) => render.text(label), { label: 'theme' });
+    expect(slotted.kind).toBe('text');
+    expect(slotted.text).toBe('theme');
+
+    const fallback = render.slot(null, { label: 'ignored' }, render.text('fallback'));
+    expect(fallback.kind).toBe('text');
+    expect(fallback.text).toBe('fallback');
+  });
 });

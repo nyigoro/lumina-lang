@@ -1,0 +1,33 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.dialogRoot(open, renderChildren)
+}
+
+pub fn trigger(props: any, children: any) -> VNode {
+  render.dialogTrigger(props, children)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.dialogPortal(children)
+}
+
+pub fn overlay(props: any) -> VNode {
+  render.dialogOverlay(props)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.dialogContent(props, children)
+}
+
+pub fn title(props: any, children: any) -> VNode {
+  render.dialogTitle(props, children)
+}
+
+pub fn description(props: any, children: any) -> VNode {
+  render.dialogDescription(props, children)
+}
+
+pub fn close(props: any, children: any) -> VNode {
+  render.dialogClose(props, children)
+}

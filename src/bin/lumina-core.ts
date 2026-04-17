@@ -25,6 +25,7 @@ import {
 import { inlinePass } from '../lumina/inline.js';
 import { comptimePass } from '../lumina/comptime.js';
 import { fuseVecPipelines } from '../lumina/stream-fusion.js';
+import { createStdModuleRegistry } from '../lumina/module-registry.js';
 import {
   buildModuleGraph,
   clearModuleGraphCache,
@@ -600,7 +601,7 @@ async function loadGrammar(grammarPath: string) {
   if (buildCache.grammarHash !== grammarHash) {
     buildCache.grammarHash = grammarHash;
     buildCache.grammarText = grammarText;
-    buildCache.parser = compileGrammar(grammarText);
+    buildCache.parser = compileGrammar(grammarText, { cache: true });
     buildCache.files.clear();
     buildCache.stats.invalidations += 1;
   }
@@ -786,7 +787,8 @@ function rewriteProgramImports(
   program: { type?: string; body?: unknown[] },
   renameMap: Map<string, string>,
   namespaceAliases: Map<string, string | null>,
-  resolvedImports: Set<string>
+  resolvedImports: Set<string>,
+  namespaceMemberRenames: Map<string, Map<string, string>> = new Map()
 ): { type: string; body: unknown[]; location?: unknown } {
   const makeIdentifier = (name: string, location?: unknown) => ({ type: 'Identifier', name, location });
   const rewriteExpr = (expr: unknown): unknown => {
@@ -813,7 +815,15 @@ function rewriteProgramImports(
           callee.name = renameMap.get(callee.name);
         }
         if (Array.isArray(node.args)) {
-          node.args = node.args.map((arg) => rewriteExpr(arg));
+          node.args = node.args.map((arg) => {
+            if (arg && typeof arg === 'object' && 'value' in (arg as { value?: unknown })) {
+              return {
+                ...(arg as Record<string, unknown>),
+                value: rewriteExpr((arg as { value?: unknown }).value),
+              };
+            }
+            return rewriteExpr(arg);
+          });
         }
         return node;
       }
@@ -826,7 +836,9 @@ function rewriteProgramImports(
             node.object = object;
             return node;
           }
-          return makeIdentifier(node.property as string, node.location);
+          const propertyName = String(node.property ?? '');
+          const memberMap = namespaceMemberRenames.get(object.name);
+          return makeIdentifier(memberMap?.get(propertyName) ?? propertyName, node.location);
         }
         node.object = rewriteExpr(node.object);
         return node;
@@ -834,6 +846,21 @@ function rewriteProgramImports(
       case 'Binary':
         node.left = rewriteExpr(node.left);
         node.right = rewriteExpr(node.right);
+        return node;
+      case 'ArrayLiteral':
+        if (Array.isArray(node.elements)) {
+          node.elements = node.elements.map((element) => rewriteExpr(element));
+        }
+        return node;
+      case 'Lambda':
+        if (Array.isArray(node.params)) {
+          node.params = node.params.map((param: { typeName?: unknown }) => ({
+            ...param,
+            typeName: rewriteTypeNameLite(param.typeName, renameMap),
+          }));
+        }
+        node.returnType = rewriteTypeNameLite(node.returnType, renameMap);
+        node.body = rewriteStmt(node.body, false);
         return node;
       case 'Move':
         node.target = rewriteExpr(node.target);
@@ -892,9 +919,12 @@ function rewriteProgramImports(
     return node;
   };
 
-  const rewriteStmt = (stmt: unknown): unknown => {
+  const rewriteStmt = (stmt: unknown, isTopLevel: boolean): unknown => {
     if (!stmt || typeof stmt !== 'object') return stmt;
     const node = stmt as { type?: string; [key: string]: unknown };
+    if (isTopLevel && typeof node.name === 'string' && renameMap.has(node.name)) {
+      node.name = renameMap.get(node.name);
+    }
     switch (node.type) {
       case 'FnDecl': {
         if (Array.isArray(node.params)) {
@@ -912,7 +942,7 @@ function rewriteProgramImports(
               : param.bound,
           }));
         }
-        node.body = rewriteStmt(node.body);
+        node.body = rewriteStmt(node.body, false);
         return node;
       }
       case 'Let':
@@ -931,12 +961,12 @@ function rewriteProgramImports(
         return node;
       case 'If':
         node.condition = rewriteExpr(node.condition);
-        node.thenBlock = rewriteStmt(node.thenBlock);
-        if (node.elseBlock) node.elseBlock = rewriteStmt(node.elseBlock);
+        node.thenBlock = rewriteStmt(node.thenBlock, false);
+        if (node.elseBlock) node.elseBlock = rewriteStmt(node.elseBlock, false);
         return node;
       case 'While':
         node.condition = rewriteExpr(node.condition);
-        node.body = rewriteStmt(node.body);
+        node.body = rewriteStmt(node.body, false);
         return node;
       case 'MatchStmt':
         node.value = rewriteExpr(node.value);
@@ -944,12 +974,12 @@ function rewriteProgramImports(
           node.arms = node.arms.map((arm: { pattern?: unknown; body?: unknown }) => ({
             ...arm,
             pattern: rewritePattern(arm.pattern),
-            body: rewriteStmt(arm.body),
+            body: rewriteStmt(arm.body, false),
           }));
         }
         return node;
       case 'Block':
-        if (Array.isArray(node.body)) node.body = node.body.map(rewriteStmt);
+        if (Array.isArray(node.body)) node.body = node.body.map((child) => rewriteStmt(child, false));
         return node;
       case 'StructDecl':
       case 'TypeDecl': {
@@ -1004,10 +1034,22 @@ function rewriteProgramImports(
           const source = node.source?.value ?? '';
           return !resolvedImports.has(source);
         })
-        .map((stmt) => rewriteStmt(stmt))
+        .map((stmt) => rewriteStmt(stmt, true))
     : [];
 
   return { type: 'Program', body, location: (program as { location?: unknown }).location };
+}
+
+function makeBundledSymbolName(moduleIndex: number, original: string, used: Set<string>): string {
+  const safeOriginal = original.replace(/[^A-Za-z0-9_]/g, '_');
+  const base = `__lumina_bundle_${moduleIndex}_${safeOriginal}`;
+  let candidate = base;
+  let suffix = 1;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix++}`;
+  }
+  used.add(candidate);
+  return candidate;
 }
 
 async function bundleProgram(
@@ -1018,6 +1060,7 @@ async function bundleProgram(
   stdPath: string,
   lockfileRoot?: string | null
 ): Promise<{ program: unknown; sources: Map<string, string> } | null> {
+  const stdRegistry = createStdModuleRegistry();
   const visited = new Map<string, { ast: unknown; text: string; bindings: ImportBindingLite[]; resolvedImports: Set<string> }>();
   const order: string[] = [];
   const sources = new Map<string, string>();
@@ -1039,6 +1082,7 @@ async function bundleProgram(
 
     const imports = extractImports(text);
     for (const imp of imports) {
+      if (stdRegistry.has(imp)) continue;
       const resolved = resolveImport(filePath, imp, extensions, stdPath, lockfileRoot);
       if (!resolved) continue;
       resolvedImports.add(imp);
@@ -1052,27 +1096,49 @@ async function bundleProgram(
   const ok = await visit(entryPath);
   if (!ok) return null;
 
+  const bundledDeclarationRenames = new Map<string, Map<string, string>>();
+  const usedBundledNames = new Set<string>();
+  order.forEach((filePath, index) => {
+    if (filePath === entryPath) return;
+    const entry = visited.get(filePath);
+    if (!entry) return;
+    const exportEnv = collectModuleExportEnv(entry.ast);
+    const renameMap = new Map<string, string>();
+    for (const name of [...exportEnv.symbols.keys(), ...exportEnv.types.keys()]) {
+      renameMap.set(name, makeBundledSymbolName(index, name, usedBundledNames));
+    }
+    bundledDeclarationRenames.set(filePath, renameMap);
+  });
+
   const mergedBody: unknown[] = [];
   for (const filePath of order) {
     const entry = visited.get(filePath);
     if (!entry) continue;
-    const renameMap = new Map<string, string>();
+    const renameMap = new Map<string, string>(bundledDeclarationRenames.get(filePath) ?? []);
     const namespaceAliases = new Map<string, string | null>();
+    const namespaceMemberRenames = new Map<string, Map<string, string>>();
     for (const binding of entry.bindings) {
       if (!entry.resolvedImports.has(binding.source)) continue;
+      const resolved = resolveImport(filePath, binding.source, extensions, stdPath, lockfileRoot);
+      const importedRenames = resolved ? bundledDeclarationRenames.get(resolved) : undefined;
       if (binding.namespace) {
         namespaceAliases.set(binding.local, null);
+        if (importedRenames) {
+          namespaceMemberRenames.set(binding.local, importedRenames);
+        }
         continue;
       }
-      if (binding.local !== binding.original) {
-        renameMap.set(binding.local, binding.original);
+      const targetName = importedRenames?.get(binding.original) ?? binding.original;
+      if (binding.local !== targetName) {
+        renameMap.set(binding.local, targetName);
       }
     }
     const rewritten = rewriteProgramImports(
       entry.ast as { type?: string; body?: unknown[] },
       renameMap,
       namespaceAliases,
-      entry.resolvedImports
+      entry.resolvedImports,
+      namespaceMemberRenames
     );
     if (Array.isArray(rewritten.body)) {
       mergedBody.push(...rewritten.body);
@@ -1415,9 +1481,10 @@ async function compileLumina(
     return mono.ast;
   };
   await updateDependenciesForFile(sourcePath, source, configFileExtensions, configStdPath, lockfileRoot);
-  const hasProjectImports = extractImports(source).some((imp) => !imp.startsWith('@std/'));
+  const stdRegistry = createStdModuleRegistry();
+  const needsBundling = extractImports(source).some((imp) => !stdRegistry.has(imp));
   if (target === 'wasm') {
-    if (hasProjectImports) {
+    if (needsBundling) {
       const bundle = await bundleProgram(
         sourcePath,
         parser,
@@ -1478,7 +1545,7 @@ async function compileLumina(
     console.log(`Lumina compiled (wasm): ${outPath}`);
     return { ok: true, map: undefined, ir: undefined };
   }
-  if (hasProjectImports) {
+  if (needsBundling) {
     const bundle = await bundleProgram(
       sourcePath,
       parser,
@@ -1770,6 +1837,8 @@ async function checkLumina(
   const parser = await loadGrammar(grammarPath);
   const source = await fs.readFile(sourcePath, 'utf-8');
   const lockfileRoot = findLockfileRoot(sourcePath);
+  const stdRegistry = createStdModuleRegistry();
+  const needsBundling = extractImports(source).some((imp) => !stdRegistry.has(imp));
   await updateDependenciesForFile(sourcePath, source, configFileExtensions, configStdPath, lockfileRoot);
   const fileHash = hashText(source);
   const cached = buildCache.files.get(sourcePath);
@@ -1801,7 +1870,20 @@ async function checkLumina(
   if (!ast) {
     return { ok: false };
   }
-  const analysis = analyzeLumina(ast as never, { diDebug: diCfg, stopOnUnresolvedMemberError });
+  let programForAnalysis: unknown = ast;
+  if (needsBundling) {
+    const bundle = await bundleProgram(
+      sourcePath,
+      parser,
+      useRecovery,
+      configFileExtensions,
+      configStdPath,
+      lockfileRoot
+    );
+    if (!bundle) return { ok: false };
+    programForAnalysis = bundle.program;
+  }
+  const analysis = analyzeLumina(programForAnalysis as never, { diDebug: diCfg, stopOnUnresolvedMemberError });
   const combinedDiagnostics = [...parseDiagnostics, ...analysis.diagnostics];
   if (combinedDiagnostics.length > 0) {
     reportDiagnosticsAndFail(source, combinedDiagnostics);
@@ -1819,7 +1901,7 @@ async function checkLumina(
   console.log('Lumina check passed');
   const entry: FileCacheEntry = {
     hash: fileHash,
-    ast,
+    ast: programForAnalysis as never,
     diagnostics: combinedDiagnostics as never,
     ir: null,
     grammarHash: buildCache.grammarHash ?? '',

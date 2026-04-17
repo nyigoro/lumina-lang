@@ -1,3 +1,10 @@
+import {
+  createContextToken,
+  FrameManager,
+  type ComponentFunction,
+  type ContextToken,
+} from './frame-manager.js';
+
 export type LuminaEnumLike =
   | { $tag: string; $payload?: unknown }
   | { tag: string; values?: unknown[] };
@@ -5951,15 +5958,19 @@ export class Effect {
 }
 
 export interface VNode {
-  kind: 'text' | 'element' | 'fragment';
+  kind: 'text' | 'element' | 'fragment' | 'portal';
   tag?: string;
   key?: string | number;
   text?: string;
   props?: Record<string, unknown>;
   children?: VNode[];
+  target?: string | null;
 }
 
 type VNodeInput = VNode | string | number | boolean | null | undefined | VNodeInput[];
+type ComponentRenderable = VNodeInput;
+
+let activeFrameManager: FrameManager | null = null;
 
 const normalizeVNodeChildren = (input: VNodeInput): VNode[] => {
   if (Array.isArray(input)) {
@@ -5998,7 +6009,10 @@ const sanitizeProps = (props: Record<string, unknown> | null | undefined): Recor
 export const isVNode = (value: unknown): value is VNode => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<VNode>;
-  return candidate.kind === 'text' || candidate.kind === 'element' || candidate.kind === 'fragment';
+  return candidate.kind === 'text'
+    || candidate.kind === 'element'
+    || candidate.kind === 'fragment'
+    || candidate.kind === 'portal';
 };
 
 export const vnodeText = (value: unknown): VNode => ({
@@ -6022,6 +6036,30 @@ export const vnodeFragment = (children: VNodeInput = []): VNode => ({
   kind: 'fragment',
   children: normalizeVNodeChildren(children),
 });
+
+export const vnodePortal = (target: string | null | undefined, children: VNodeInput = []): VNode => ({
+  kind: 'portal',
+  target: target == null ? null : String(target),
+  children: normalizeVNodeChildren(children),
+});
+
+const coerceRenderableToVNode = (input: VNodeInput): VNode => {
+  const children = normalizeVNodeChildren(input);
+  if (children.length === 1) {
+    return children[0];
+  }
+  return vnodeFragment(children);
+};
+
+const applyVNodeKey = (node: VNode, key: unknown): VNode => {
+  if ((typeof key !== 'string' && typeof key !== 'number') || node.key !== undefined) {
+    return node;
+  }
+  return { ...node, key };
+};
+
+const resolveChildrenInput = (input: unknown): VNodeInput =>
+  typeof input === 'function' ? (input as () => VNodeInput)() : (input as VNodeInput);
 
 export const serializeVNode = (node: VNode): string => JSON.stringify(node);
 
@@ -6055,13 +6093,28 @@ interface DomNodeLike extends DomEventTargetLike {
 interface DomElementLike extends DomNodeLike {
   setAttribute?: (name: string, value: string) => void;
   removeAttribute?: (name: string) => void;
+  getAttribute?: (name: string) => string | null;
   className?: string;
   style?: Record<string, unknown> & { setProperty?: (name: string, value: string) => void };
+  tagName?: string;
+  focus?: () => void;
+  blur?: () => void;
+  getBoundingClientRect?: () => {
+    left?: number;
+    top?: number;
+    right?: number;
+    bottom?: number;
+    width?: number;
+    height?: number;
+  };
 }
 
 interface DomDocumentLike {
   createElement: (tag: string) => DomElementLike;
   createTextNode: (value: string) => DomNodeLike;
+  body?: DomElementLike;
+  querySelector?: (selector: string) => DomElementLike | null;
+  getElementById?: (id: string) => DomElementLike | null;
 }
 
 interface DomRendererOptions {
@@ -6122,6 +6175,10 @@ const setDomProperty = (
   eventStore: DomEventStore
 ): void => {
   if (name === 'key') return;
+
+  if (name === 'autoFocus') {
+    return;
+  }
 
   if (isEventProp(name)) {
     const event = normalizeEventName(name);
@@ -6198,6 +6255,10 @@ const updateDomProperties = (
     if (prev[key] === value) continue;
     setDomProperty(element, key, value, eventStore);
   }
+
+  if (nxt.autoFocus && prev.autoFocus !== nxt.autoFocus) {
+    element.focus?.();
+  }
 };
 
 const setChildren = (container: DomNodeLike, children: DomNodeLike[]): void => {
@@ -6210,28 +6271,362 @@ const setChildren = (container: DomNodeLike, children: DomNodeLike[]): void => {
   }
 };
 
+interface DomPortalState {
+  target: DomElementLike | null;
+  host: DomElementLike | null;
+}
+
+type DomPortalStore = WeakMap<DomNodeLike, DomPortalState>;
+
+const resolvePortalTarget = (node: VNode, documentLike: DomDocumentLike): DomElementLike | null => {
+  const target = node.target;
+  if (target == null || target === '' || target === 'body') {
+    return documentLike.body ?? null;
+  }
+  if (typeof documentLike.querySelector === 'function') {
+    return documentLike.querySelector(String(target));
+  }
+  return null;
+};
+
+const disposeDomNode = (
+  node: DomNodeLike,
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): void => {
+  const portal = portalStore.get(node);
+  if (portal?.host) {
+    disposeDomNode(portal.host, eventStore, portalStore);
+    const portalParent = portal.host.parentNode;
+    if (portalParent) {
+      try {
+        portalParent.removeChild(portal.host);
+      } catch {
+        // Ignore stale/detached portal hosts.
+      }
+    }
+  }
+  portalStore.delete(node);
+
+  for (const child of Array.from(node.childNodes ?? [])) {
+    disposeDomNode(child, eventStore, portalStore);
+  }
+
+  eventStore.delete(node);
+};
+
+const replaceChildren = (
+  container: DomNodeLike,
+  children: DomNodeLike[],
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): void => {
+  const current = Array.from(container.childNodes);
+  for (const child of current) {
+    disposeDomNode(child, eventStore, portalStore);
+    container.removeChild(child);
+  }
+  for (const child of children) {
+    container.appendChild(child);
+  }
+};
+
 const vnodeKindTag = (node: VNode): string => `${node.kind}:${node.tag ?? ''}`;
+
+const hasVNodeKey = (node: VNode): node is VNode & { key: string | number } =>
+  typeof node.key === 'string' || typeof node.key === 'number';
+
+const hasKeyedChildren = (children: VNode[]): boolean => children.some((child) => hasVNodeKey(child));
+
+const duplicateKeyError = (key: string | number): Error =>
+  new Error(`Duplicate keyed child '${String(key)}' in the same parent is not supported`);
+
+const mergeClassValues = (left: unknown, right: unknown): unknown => {
+  const tokens = [left, right]
+    .flatMap((value) => (typeof value === 'string' ? value.split(/\s+/) : []))
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) return right ?? left;
+  return Array.from(new Set(tokens)).join(' ');
+};
+
+const mergeStyleValues = (left: unknown, right: unknown): unknown => {
+  if (typeof left === 'string' && typeof right === 'string') {
+    const parts = [left, right]
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    return parts.join(parts.length > 1 ? ';' : '');
+  }
+
+  if (
+    left &&
+    right &&
+    typeof left === 'object' &&
+    typeof right === 'object' &&
+    !Array.isArray(left) &&
+    !Array.isArray(right)
+  ) {
+    return {
+      ...(left as Record<string, unknown>),
+      ...(right as Record<string, unknown>),
+    };
+  }
+
+  return right ?? left;
+};
+
+const preventDefaultIfNeeded = (args: unknown[]): void => {
+  const event = args[0] as { preventDefault?: () => void } | undefined;
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+};
+
+const composeHandlers = <Args extends unknown[]>(
+  left: ((...args: Args) => unknown) | null | undefined,
+  right: ((...args: Args) => unknown) | null | undefined
+): ((...args: Args) => unknown) | undefined => {
+  if (typeof left !== 'function') return typeof right === 'function' ? right : undefined;
+  if (typeof right !== 'function') return left;
+
+  return (...args: Args) => {
+    const leftResult = left(...args);
+    if (leftResult === false) {
+      preventDefaultIfNeeded(args);
+    }
+
+    const rightResult = right(...args);
+    if (rightResult === false) {
+      preventDefaultIfNeeded(args);
+    }
+
+    return rightResult === undefined ? leftResult : rightResult;
+  };
+};
+
+const mergePropValue = (name: string, left: unknown, right: unknown): unknown => {
+  if (right === undefined) return left;
+  if (left === undefined) return right;
+
+  if (name === 'class' || name === 'className') {
+    return mergeClassValues(left, right);
+  }
+
+  if (name === 'style') {
+    return mergeStyleValues(left, right);
+  }
+
+  if (isEventProp(name) && typeof left === 'function' && typeof right === 'function') {
+    return composeHandlers(
+      left as (...args: unknown[]) => unknown,
+      right as (...args: unknown[]) => unknown
+    );
+  }
+
+  return right;
+};
+
+const mergeProps = (left: unknown, right: unknown): Record<string, unknown> => {
+  const lhs = left && typeof left === 'object' ? (left as Record<string, unknown>) : {};
+  const rhs = right && typeof right === 'object' ? (right as Record<string, unknown>) : {};
+  const merged: Record<string, unknown> = {};
+
+  for (const key of new Set([...Object.keys(lhs), ...Object.keys(rhs)])) {
+    const value = mergePropValue(key, lhs[key], rhs[key]);
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+};
+
+const patchPortalMount = (
+  anchor: DomElementLike,
+  prevNode: VNode | null,
+  nextNode: VNode,
+  documentLike: DomDocumentLike,
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): void => {
+  const previous = portalStore.get(anchor) ?? { target: null, host: null };
+  const nextTarget = resolvePortalTarget(nextNode, documentLike);
+  const prevChildren = prevNode?.kind === 'portal' ? (prevNode.children ?? []) : [];
+  const nextChildren = nextNode.children ?? [];
+
+  if (!nextTarget) {
+    if (previous.host) {
+      replaceChildren(previous.host, [], eventStore, portalStore);
+      const parent = previous.host.parentNode;
+      if (parent) parent.removeChild(previous.host);
+    }
+    portalStore.set(anchor, { target: null, host: null });
+    return;
+  }
+
+  let host = previous.host;
+  const targetChanged = previous.target !== nextTarget || !host || host.parentNode !== nextTarget;
+  if (targetChanged) {
+    if (host) {
+      replaceChildren(host, [], eventStore, portalStore);
+      const parent = host.parentNode;
+      if (parent) parent.removeChild(host);
+    }
+    host = documentLike.createElement('lumina-portal-host');
+    nextTarget.appendChild(host);
+  }
+  if (!host) {
+    host = documentLike.createElement('lumina-portal-host');
+    nextTarget.appendChild(host);
+  }
+
+  if (targetChanged || !prevNode || prevNode.kind !== 'portal') {
+    const mountedChildren = nextChildren.map((child) => createDomNode(child, documentLike, eventStore, portalStore));
+    replaceChildren(host, mountedChildren, eventStore, portalStore);
+  } else if (hasKeyedChildren(prevChildren) || hasKeyedChildren(nextChildren)) {
+    patchDomChildrenWithKeys(host, prevChildren, nextChildren, documentLike, eventStore, portalStore);
+  } else {
+    patchDomChildrenPositionally(host, prevChildren, nextChildren, documentLike, eventStore, portalStore);
+  }
+
+  portalStore.set(anchor, { target: nextTarget, host });
+};
 
 const createDomNode = (
   node: VNode,
   documentLike: DomDocumentLike,
-  eventStore: DomEventStore
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
 ): DomNodeLike => {
   if (node.kind === 'text') {
     return documentLike.createTextNode(node.text ?? '');
   }
   if (node.kind === 'fragment') {
     const wrapper = documentLike.createElement('lumina-fragment');
-    const children = asDomChildren(node).map((child) => createDomNode(child, documentLike, eventStore));
+    const children = asDomChildren(node).map((child) => createDomNode(child, documentLike, eventStore, portalStore));
     setChildren(wrapper, children);
     return wrapper;
+  }
+  if (node.kind === 'portal') {
+    const anchor = documentLike.createElement('lumina-portal-anchor');
+    updateDomProperties(anchor, {}, { hidden: true, 'data-lumina-portal-anchor': 'true' }, eventStore);
+    patchPortalMount(anchor, null, node, documentLike, eventStore, portalStore);
+    return anchor;
   }
 
   const element = documentLike.createElement(node.tag ?? 'div');
   updateDomProperties(element, {}, node.props, eventStore);
-  const children = asDomChildren(node).map((child) => createDomNode(child, documentLike, eventStore));
+  const children = asDomChildren(node).map((child) => createDomNode(child, documentLike, eventStore, portalStore));
   setChildren(element, children);
   return element;
+};
+
+const patchDomChildrenPositionally = (
+  element: DomElementLike,
+  prevChildren: VNode[],
+  nextChildren: VNode[],
+  documentLike: DomDocumentLike,
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): void => {
+  const shared = Math.min(prevChildren.length, nextChildren.length);
+
+  for (let i = 0; i < shared; i += 1) {
+    const currentChild = element.childNodes[i];
+    if (!currentChild) {
+      element.appendChild(createDomNode(nextChildren[i], documentLike, eventStore, portalStore));
+      continue;
+    }
+    patchDomNode(currentChild, prevChildren[i], nextChildren[i], documentLike, eventStore, portalStore);
+  }
+
+  if (nextChildren.length > prevChildren.length) {
+    for (let i = prevChildren.length; i < nextChildren.length; i += 1) {
+      element.appendChild(createDomNode(nextChildren[i], documentLike, eventStore, portalStore));
+    }
+  } else if (prevChildren.length > nextChildren.length) {
+    for (let i = prevChildren.length - 1; i >= nextChildren.length; i -= 1) {
+      const child = element.childNodes[i];
+      if (child) {
+        disposeDomNode(child, eventStore, portalStore);
+        element.removeChild(child);
+      }
+    }
+  }
+};
+
+const patchDomChildrenWithKeys = (
+  element: DomElementLike,
+  prevChildren: VNode[],
+  nextChildren: VNode[],
+  documentLike: DomDocumentLike,
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): void => {
+  const currentDomChildren = Array.from(element.childNodes);
+  const prevKeyed = new Map<string | number, { vnode: VNode; domNode: DomNodeLike }>();
+  const prevUnkeyed: Array<{ vnode: VNode; domNode: DomNodeLike }> = [];
+
+  for (let i = 0; i < prevChildren.length; i += 1) {
+    const prevChild = prevChildren[i];
+    const domChild = currentDomChildren[i];
+    if (!domChild) continue;
+
+    if (hasVNodeKey(prevChild)) {
+      if (prevKeyed.has(prevChild.key)) {
+        throw duplicateKeyError(prevChild.key);
+      }
+      prevKeyed.set(prevChild.key, { vnode: prevChild, domNode: domChild });
+      continue;
+    }
+
+    prevUnkeyed.push({ vnode: prevChild, domNode: domChild });
+  }
+
+  const seenNextKeys = new Set<string | number>();
+  const nextDomChildren: DomNodeLike[] = [];
+  let unkeyedIndex = 0;
+
+  for (const nextChild of nextChildren) {
+    if (hasVNodeKey(nextChild)) {
+      if (seenNextKeys.has(nextChild.key)) {
+        throw duplicateKeyError(nextChild.key);
+      }
+      seenNextKeys.add(nextChild.key);
+
+      const prevEntry = prevKeyed.get(nextChild.key);
+      if (!prevEntry) {
+        nextDomChildren.push(createDomNode(nextChild, documentLike, eventStore, portalStore));
+        continue;
+      }
+
+      prevKeyed.delete(nextChild.key);
+      nextDomChildren.push(
+        patchDomNode(prevEntry.domNode, prevEntry.vnode, nextChild, documentLike, eventStore, portalStore)
+      );
+      continue;
+    }
+
+    const prevEntry = prevUnkeyed[unkeyedIndex];
+    unkeyedIndex += 1;
+    if (!prevEntry) {
+      nextDomChildren.push(createDomNode(nextChild, documentLike, eventStore, portalStore));
+      continue;
+    }
+
+    nextDomChildren.push(
+      patchDomNode(prevEntry.domNode, prevEntry.vnode, nextChild, documentLike, eventStore, portalStore)
+    );
+  }
+
+  for (const stale of prevKeyed.values()) {
+    disposeDomNode(stale.domNode, eventStore, portalStore);
+  }
+  for (let i = unkeyedIndex; i < prevUnkeyed.length; i += 1) {
+    disposeDomNode(prevUnkeyed[i].domNode, eventStore, portalStore);
+  }
+
+  setChildren(element, nextDomChildren);
 };
 
 const patchDomNode = (
@@ -6239,15 +6634,18 @@ const patchDomNode = (
   prevNode: VNode,
   nextNode: VNode,
   documentLike: DomDocumentLike,
-  eventStore: DomEventStore
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
 ): DomNodeLike => {
   if (vnodeKindTag(prevNode) !== vnodeKindTag(nextNode)) {
-    const replacement = createDomNode(nextNode, documentLike, eventStore);
+    const replacement = createDomNode(nextNode, documentLike, eventStore, portalStore);
     const parent = domNode.parentNode;
     if (parent && parent.replaceChild) {
       parent.replaceChild(replacement, domNode);
+      disposeDomNode(domNode, eventStore, portalStore);
       return replacement;
     }
+    disposeDomNode(domNode, eventStore, portalStore);
     return replacement;
   }
 
@@ -6259,6 +6657,11 @@ const patchDomNode = (
     return domNode;
   }
 
+  if (nextNode.kind === 'portal') {
+    patchPortalMount(domNode as DomElementLike, prevNode, nextNode, documentLike, eventStore, portalStore);
+    return domNode;
+  }
+
   const element = domNode as DomElementLike;
   if (nextNode.kind === 'element') {
     updateDomProperties(element, prevNode.props, nextNode.props, eventStore);
@@ -6266,26 +6669,10 @@ const patchDomNode = (
 
   const prevChildren = asDomChildren(prevNode);
   const nextChildren = asDomChildren(nextNode);
-  const shared = Math.min(prevChildren.length, nextChildren.length);
-
-  for (let i = 0; i < shared; i += 1) {
-    const currentChild = element.childNodes[i];
-    if (!currentChild) {
-      element.appendChild(createDomNode(nextChildren[i], documentLike, eventStore));
-      continue;
-    }
-    patchDomNode(currentChild, prevChildren[i], nextChildren[i], documentLike, eventStore);
-  }
-
-  if (nextChildren.length > prevChildren.length) {
-    for (let i = prevChildren.length; i < nextChildren.length; i += 1) {
-      element.appendChild(createDomNode(nextChildren[i], documentLike, eventStore));
-    }
-  } else if (prevChildren.length > nextChildren.length) {
-    for (let i = prevChildren.length - 1; i >= nextChildren.length; i -= 1) {
-      const child = element.childNodes[i];
-      if (child) element.removeChild(child);
-    }
+  if (hasKeyedChildren(prevChildren) || hasKeyedChildren(nextChildren)) {
+    patchDomChildrenWithKeys(element, prevChildren, nextChildren, documentLike, eventStore, portalStore);
+  } else {
+    patchDomChildrenPositionally(element, prevChildren, nextChildren, documentLike, eventStore, portalStore);
   }
 
   return element;
@@ -6294,27 +6681,28 @@ const patchDomNode = (
 export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
   const documentLike = getDomDocument(options);
   const eventStore: DomEventStore = new Map();
+  const portalStore: DomPortalStore = new WeakMap();
   let currentDom: DomNodeLike | null = null;
   let currentVNode: VNode | null = null;
 
   return {
     mount(node: VNode, container: unknown): void {
       const domContainer = container as DomNodeLike;
-      const domNode = createDomNode(node, documentLike, eventStore);
-      setChildren(domContainer, [domNode]);
+      const domNode = createDomNode(node, documentLike, eventStore, portalStore);
+      replaceChildren(domContainer, [domNode], eventStore, portalStore);
       currentDom = domNode;
       currentVNode = node;
     },
     patch(prev: VNode | null, next: VNode, container: unknown): void {
       const domContainer = container as DomNodeLike;
       if (!currentDom || !currentVNode || !prev) {
-        const domNode = createDomNode(next, documentLike, eventStore);
-        setChildren(domContainer, [domNode]);
+        const domNode = createDomNode(next, documentLike, eventStore, portalStore);
+        replaceChildren(domContainer, [domNode], eventStore, portalStore);
         currentDom = domNode;
         currentVNode = next;
         return;
       }
-      const nextDom = patchDomNode(currentDom, prev, next, documentLike, eventStore);
+      const nextDom = patchDomNode(currentDom, prev, next, documentLike, eventStore, portalStore);
       if (nextDom !== currentDom) {
         setChildren(domContainer, [nextDom]);
       }
@@ -6325,8 +6713,8 @@ export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
       const domContainer = container as DomNodeLike;
       const existing = domContainer.childNodes?.[0] ?? null;
       if (!existing) {
-        const domNode = createDomNode(node, documentLike, eventStore);
-        setChildren(domContainer, [domNode]);
+        const domNode = createDomNode(node, documentLike, eventStore, portalStore);
+        replaceChildren(domContainer, [domNode], eventStore, portalStore);
         currentDom = domNode;
         currentVNode = node;
         return;
@@ -6336,7 +6724,7 @@ export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
     },
     unmount(container: unknown): void {
       const domContainer = container as DomNodeLike;
-      setChildren(domContainer, []);
+      replaceChildren(domContainer, [], eventStore, portalStore);
       currentDom = null;
       currentVNode = null;
       eventStore.clear();
@@ -6404,7 +6792,7 @@ const voidHtmlTags = new Set([
 const vnodeToHtml = (node: VNode): string => {
   if (node.kind === 'text') return escapeHtml(node.text ?? '');
   const children = (node.children ?? []).map((child) => vnodeToHtml(child)).join('');
-  if (node.kind === 'fragment') return children;
+  if (node.kind === 'fragment' || node.kind === 'portal') return children;
 
   const tag = node.tag ?? 'div';
   const attrs = serializePropsToHtml(node.props);
@@ -6519,7 +6907,7 @@ const drawCanvasVNode = (
     if (ctx.fillText) ctx.fillText(node.text ?? '', state.x, state.y);
     return state.y + state.lineHeight;
   }
-  if (node.kind === 'fragment') {
+  if (node.kind === 'fragment' || node.kind === 'portal') {
     let y = state.y;
     for (const child of node.children ?? []) {
       y = drawCanvasVNode(ctx, child, { ...state, y });
@@ -6608,7 +6996,7 @@ const vnodeToTerminal = (node: VNode, depth = 0): string[] => {
   if (node.kind === 'text') {
     return [`${indent}${node.text ?? ''}`];
   }
-  if (node.kind === 'fragment') {
+  if (node.kind === 'fragment' || node.kind === 'portal') {
     return (node.children ?? []).flatMap((child) => vnodeToTerminal(child, depth));
   }
   const tag = node.tag ?? 'div';
@@ -6709,11 +7097,13 @@ export class RenderRoot {
 export class ReactiveRenderRoot {
   constructor(
     readonly root: RenderRoot,
-    readonly effect: Effect
+    readonly effect: Effect,
+    readonly frameManager: FrameManager
   ) {}
 
   dispose(): void {
     this.effect.dispose();
+    this.frameManager.disposeFrame(this.frameManager.rootFrame, false);
     this.root.unmount();
   }
 }
@@ -6755,6 +7145,462 @@ const coerceRenderer = (candidate: unknown): Renderer => {
   return renderer;
 };
 
+const runWithFrameManager = <T>(frameManager: FrameManager, renderView: () => T): T => {
+  frameManager.beginRender();
+  frameManager.rootFrame.seenEpoch = frameManager.renderEpoch;
+  const previousManager = activeFrameManager;
+  activeFrameManager = frameManager;
+  try {
+    return frameManager.renderFrame(frameManager.rootFrame, renderView);
+  } finally {
+    activeFrameManager = previousManager;
+  }
+};
+
+const requireActiveFrameManager = (apiName: string): FrameManager => {
+  if (!activeFrameManager) {
+    throw new Error(`${apiName} can only be used while rendering inside mount_reactive or hydrate_reactive`);
+  }
+  return activeFrameManager;
+};
+
+interface TabsContextValue {
+  value: Signal<string>;
+  baseId: string;
+  order: string[];
+}
+
+interface DialogContextValue {
+  open: Signal<boolean>;
+  baseId: string;
+  hasTitle: boolean;
+  hasDescription: boolean;
+}
+
+interface PopoverContextValue {
+  open: Signal<boolean>;
+  baseId: string;
+}
+
+interface MenuContextValue {
+  open: Signal<boolean>;
+  baseId: string;
+  order: string[];
+}
+
+const tabsContext = createContextToken<TabsContextValue>();
+const tabsRootIds = new WeakMap<object, string>();
+let nextTabsRootId = 1;
+
+const getTabsBaseId = (signal: Signal<string>): string => {
+  const existing = tabsRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-tabs-${nextTabsRootId++}`;
+  tabsRootIds.set(signal as object, next);
+  return next;
+};
+
+const normalizeTabsPart = (value: string): string => {
+  const normalized = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized.length > 0 ? normalized : 'tab';
+};
+
+const getTabsIds = (ctx: TabsContextValue, value: string): { triggerId: string; panelId: string } => {
+  const part = normalizeTabsPart(value);
+  return {
+    triggerId: `${ctx.baseId}-trigger-${part}`,
+    panelId: `${ctx.baseId}-panel-${part}`,
+  };
+};
+
+const registerTabsValue = (ctx: TabsContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const getTabsNavigationTarget = (ctx: TabsContextValue, current: string, key: string): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowRight' || key === 'ArrowDown') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowLeft' || key === 'ArrowUp') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+
+  return null;
+};
+
+const dialogContext = createContextToken<DialogContextValue>();
+const dialogRootIds = new WeakMap<object, string>();
+const dialogRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextDialogRootId = 1;
+
+const popoverContext = createContextToken<PopoverContextValue>();
+const popoverRootIds = new WeakMap<object, string>();
+const popoverAnchorTargets = new WeakMap<object, DomElementLike>();
+const popoverRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextPopoverRootId = 1;
+
+const menuContext = createContextToken<MenuContextValue>();
+const menuRootIds = new WeakMap<object, string>();
+const menuAnchorTargets = new WeakMap<object, DomElementLike>();
+const menuRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextMenuRootId = 1;
+
+const getDialogBaseId = (signal: Signal<boolean>): string => {
+  const existing = dialogRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-dialog-${nextDialogRootId++}`;
+  dialogRootIds.set(signal as object, next);
+  return next;
+};
+
+const getPopoverBaseId = (signal: Signal<boolean>): string => {
+  const existing = popoverRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-popover-${nextPopoverRootId++}`;
+  popoverRootIds.set(signal as object, next);
+  return next;
+};
+
+const getMenuBaseId = (signal: Signal<boolean>): string => {
+  const existing = menuRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-menu-${nextMenuRootId++}`;
+  menuRootIds.set(signal as object, next);
+  return next;
+};
+
+const getDialogIds = (
+  ctx: DialogContextValue
+): { triggerId: string; contentId: string; titleId: string; descriptionId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+  titleId: `${ctx.baseId}-title`,
+  descriptionId: `${ctx.baseId}-description`,
+});
+
+const getPopoverIds = (
+  ctx: PopoverContextValue
+): { triggerId: string; contentId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getMenuIds = (
+  ctx: MenuContextValue
+): { triggerId: string; contentId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getMenuItemId = (ctx: MenuContextValue, value: string): string =>
+  `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getFocusTargetFromEvent = (event: unknown): { focus?: () => void } | null => {
+  if (!event || typeof event !== 'object') return null;
+  const target = (event as { currentTarget?: unknown; target?: unknown }).currentTarget
+    ?? (event as { target?: unknown }).target;
+  return target && typeof target === 'object' ? (target as { focus?: () => void }) : null;
+};
+
+const elementRecord = (element: DomElementLike): Record<string, unknown> =>
+  element as unknown as Record<string, unknown>;
+
+const getDomAttribute = (element: DomElementLike, name: string): string | null => {
+  if (typeof element.getAttribute === 'function') {
+    const value = element.getAttribute(name);
+    return value == null ? null : String(value);
+  }
+
+  const attributes = (element as { attributes?: { get?: (key: string) => unknown } }).attributes;
+  if (attributes && typeof attributes.get === 'function') {
+    const value = attributes.get(name);
+    return value == null ? null : String(value);
+  }
+
+  const value = elementRecord(element)[name];
+  return value == null ? null : String(value);
+};
+
+const isElementHidden = (element: DomElementLike): boolean =>
+  elementRecord(element).hidden === true || getDomAttribute(element, 'hidden') !== null;
+
+const isElementDisabled = (element: DomElementLike): boolean =>
+  elementRecord(element).disabled === true || getDomAttribute(element, 'disabled') !== null;
+
+const getElementTabIndex = (element: DomElementLike): number | null => {
+  const raw = elementRecord(element).tabIndex ?? getDomAttribute(element, 'tabIndex') ?? getDomAttribute(element, 'tabindex');
+  if (raw === null || raw === undefined || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isFocusableElement = (element: DomElementLike): boolean => {
+  if (isElementHidden(element) || isElementDisabled(element)) return false;
+
+  const tabIndex = getElementTabIndex(element);
+  if (tabIndex !== null) {
+    return tabIndex >= 0;
+  }
+
+  const tag = String(element.tagName ?? '').toLowerCase();
+  if (tag === 'a') {
+    return getDomAttribute(element, 'href') !== null;
+  }
+
+  return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea';
+};
+
+const collectFocusableDescendants = (root: DomNodeLike): DomElementLike[] => {
+  const focusable: DomElementLike[] = [];
+  const visit = (node: DomNodeLike): void => {
+    for (const child of Array.from(node.childNodes ?? [])) {
+      const element = child as DomElementLike;
+      if (typeof element.focus === 'function' && isFocusableElement(element)) {
+        focusable.push(element);
+      }
+      if (Array.isArray(child.childNodes) && child.childNodes.length > 0) {
+        visit(child);
+      }
+    }
+  };
+  visit(root);
+  return focusable;
+};
+
+const trapDialogTabNavigation = (event: KeyboardEvent | undefined): boolean => {
+  if (String(event?.key ?? '') !== 'Tab') return false;
+
+  const container = getFocusTargetFromEvent(event) as (DomElementLike & { ownerDocument?: { activeElement?: unknown } }) | null;
+  if (!container || !Array.isArray(container.childNodes)) return false;
+
+  const focusable = collectFocusableDescendants(container);
+  if (focusable.length === 0) {
+    event?.preventDefault?.();
+    container.focus?.();
+    return true;
+  }
+
+  const active = container.ownerDocument?.activeElement ?? null;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const isShift = Boolean((event as { shiftKey?: unknown } | undefined)?.shiftKey);
+
+  if (isShift) {
+    if (active === container || active === first || !focusable.includes(active as DomElementLike)) {
+      event?.preventDefault?.();
+      last.focus?.();
+      return true;
+    }
+    return false;
+  }
+
+  if (active === container || active === last || !focusable.includes(active as DomElementLike)) {
+    event?.preventDefault?.();
+    first.focus?.();
+    return true;
+  }
+
+  return false;
+};
+
+const restoreDialogFocus = (ctx: DialogContextValue): void => {
+  const key = ctx.open as object;
+  const target = dialogRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  dialogRestoreTargets.delete(key);
+  target.focus?.();
+};
+
+const restorePopoverFocus = (ctx: PopoverContextValue): void => {
+  const key = ctx.open as object;
+  const target = popoverRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  popoverRestoreTargets.delete(key);
+  target.focus?.();
+};
+
+const restoreMenuFocus = (ctx: MenuContextValue): void => {
+  const key = ctx.open as object;
+  const target = menuRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  menuRestoreTargets.delete(key);
+  target.focus?.();
+};
+
+const registerMenuValue = (ctx: MenuContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const getMenuNavigationTarget = (ctx: MenuContextValue, current: string, key: string): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowDown') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowUp') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+  return null;
+};
+
+const focusMenuItem = (
+  documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
+  ctx: MenuContextValue,
+  value: string
+): boolean => {
+  if (!documentLike || typeof documentLike.getElementById !== 'function') return false;
+  const target = documentLike.getElementById(getMenuItemId(ctx, value));
+  if (!target || typeof target.focus !== 'function') return false;
+  target.focus();
+  return true;
+};
+
+const closeMenu = (ctx: MenuContextValue): void => {
+  ctx.open.set(false);
+  restoreMenuFocus(ctx);
+};
+
+const readNumericRectValue = (value: unknown): number | null => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getPopoverAnchorRect = (
+  ctx: PopoverContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = popoverAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
+const getMenuAnchorRect = (
+  ctx: MenuContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = menuAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
+type PopoverSide = 'top' | 'bottom' | 'left' | 'right';
+type PopoverAlign = 'start' | 'center' | 'end';
+
+const pickPopoverSide = (props: Record<string, unknown> | null | undefined): PopoverSide => {
+  const value = props?.side;
+  return value === 'top' || value === 'bottom' || value === 'left' || value === 'right' ? value : 'bottom';
+};
+
+const pickPopoverAlign = (props: Record<string, unknown> | null | undefined): PopoverAlign => {
+  const value = props?.align;
+  return value === 'start' || value === 'center' || value === 'end' ? value : 'center';
+};
+
+const pickPopoverOffset = (props: Record<string, unknown> | null | undefined): number => {
+  const value = props?.offset;
+  return typeof value === 'number' && Number.isFinite(value) ? value : 8;
+};
+
+const omitPopoverLayoutProps = (
+  props: Record<string, unknown> | null | undefined
+): Record<string, unknown> | undefined => {
+  if (!props) return undefined;
+  const next = { ...props };
+  delete next.side;
+  delete next.align;
+  delete next.offset;
+  return next;
+};
+
+const getPopoverContentStyle = (
+  rect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null,
+  props: Record<string, unknown> | null | undefined
+): Record<string, unknown> => {
+  const side = pickPopoverSide(props);
+  const align = pickPopoverAlign(props);
+  const offset = pickPopoverOffset(props);
+  const style: Record<string, unknown> = {
+    position: 'fixed',
+    zIndex: '1001',
+  };
+
+  if (!rect) {
+    return {
+      ...style,
+      top: '16px',
+      left: '16px',
+    };
+  }
+
+  if (side === 'top' || side === 'bottom') {
+    style.top = `${Math.round(side === 'bottom' ? rect.bottom + offset : rect.top - offset)}px`;
+    if (align === 'start') {
+      style.left = `${Math.round(rect.left)}px`;
+    } else if (align === 'end') {
+      style.left = `${Math.round(rect.right)}px`;
+      style.transform = side === 'top' ? 'translate(-100%, -100%)' : 'translateX(-100%)';
+    } else {
+      style.left = `${Math.round(rect.left + rect.width / 2)}px`;
+      style.transform = side === 'top' ? 'translate(-50%, -100%)' : 'translateX(-50%)';
+    }
+    if (align === 'start' && side === 'top') {
+      style.transform = 'translateY(-100%)';
+    }
+    return style;
+  }
+
+  style.left = `${Math.round(side === 'right' ? rect.right + offset : rect.left - offset)}px`;
+  if (align === 'start') {
+    style.top = `${Math.round(rect.top)}px`;
+  } else if (align === 'end') {
+    style.top = `${Math.round(rect.bottom)}px`;
+    style.transform = side === 'left' ? 'translate(-100%, -100%)' : 'translateY(-100%)';
+  } else {
+    style.top = `${Math.round(rect.top + rect.height / 2)}px`;
+    style.transform = side === 'left' ? 'translate(-100%, -50%)' : 'translateY(-50%)';
+  }
+  if (align === 'start' && side === 'left') {
+    style.transform = 'translateX(-100%)';
+  }
+  return style;
+};
+
 export const render = {
   signal: <T>(initial: T): Signal<T> => new Signal<T>(initial),
   get: <T>(signal: Signal<T>): T => signal.get(),
@@ -6794,6 +7640,655 @@ export const render = {
       activeComputation = previous;
     }
   },
+  component: <P>(
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P,
+    key?: unknown
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.component');
+    const parentFrame = frameManager.currentFrame ?? frameManager.rootFrame;
+    const { result } = frameManager.executeComponent(parentFrame, componentFn, key ?? null, props);
+    return applyVNodeKey(coerceRenderableToVNode(result), key);
+  },
+  component_keyed: <P>(
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P,
+    key: unknown
+  ): VNode => render.component(componentFn, props, key),
+  create_context: <T>(defaultValue?: T): ContextToken<T> => createContextToken(defaultValue),
+  create_required_context: <T>(): ContextToken<T> => createContextToken<T>(),
+  with_context: <T>(
+    context: ContextToken<T>,
+    value: T,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.with_context');
+    return coerceRenderableToVNode(frameManager.withContext(context, value, renderChildren));
+  },
+  use_context: <T>(context: ContextToken<T>): T => {
+    const frameManager = requireActiveFrameManager('render.use_context');
+    return frameManager.useContext(context);
+  },
+  state: <T>(initial: T): Signal<T> => {
+    const frameManager = requireActiveFrameManager('render.state');
+    return frameManager.getSlot('state', () => new Signal<T>(initial));
+  },
+  remember: <T>(compute: () => T): T => {
+    const frameManager = requireActiveFrameManager('render.remember');
+    return frameManager.getSlot('memo', compute);
+  },
+  children: (input: unknown): VNode[] => normalizeVNodeChildren(resolveChildrenInput(input)),
+  slot: <P>(
+    slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
+    props: P,
+    fallback: VNodeInput = []
+  ): VNode => {
+    if (typeof slotValue === 'function') {
+      return coerceRenderableToVNode((slotValue as (value: P) => ComponentRenderable)(props));
+    }
+    if (slotValue === null || slotValue === undefined) {
+      return coerceRenderableToVNode(fallback);
+    }
+    return coerceRenderableToVNode(slotValue);
+  },
+  slot_or: <P>(
+    slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
+    props: P,
+    fallback: VNodeInput
+  ): VNode => render.slot(slotValue, props, fallback),
+  compose_handlers: <Args extends unknown[]>(
+    left: ((...args: Args) => unknown) | null | undefined,
+    right: ((...args: Args) => unknown) | null | undefined
+  ): ((...args: Args) => unknown) | undefined => composeHandlers(left, right),
+  portal: (target: string | null | undefined, children: VNodeInput = []): VNode => vnodePortal(target, children),
+  portal_body: (children: VNodeInput = []): VNode => vnodePortal(null, children),
+  tabs_root: (value: Signal<string>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.tabs_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(tabsContext, { value, baseId: getTabsBaseId(value), order: [] }, renderChildren)
+    );
+  },
+  tabs_list: (
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode =>
+    vnodeElement(
+      'div',
+      mergeProps({ role: 'tablist', 'data-lumina-tabs-list': 'true' }, props),
+      resolveChildrenInput(renderChildren)
+    ),
+  tabs_trigger: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.tabs_trigger');
+    const ctx = frameManager.useContext(tabsContext);
+    registerTabsValue(ctx, value);
+    const selected = ctx.value.get() === value;
+    const { triggerId, panelId } = getTabsIds(ctx, value);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          role: 'tab',
+          type: 'button',
+          id: triggerId,
+          'aria-controls': panelId,
+          'aria-selected': selected ? 'true' : 'false',
+          tabIndex: selected ? 0 : -1,
+          'data-state': selected ? 'active' : 'inactive',
+          onClick: () => ctx.value.set(value),
+          onKeyDown: (event?: KeyboardEvent) => {
+            const nextValue = getTabsNavigationTarget(ctx, value, String(event?.key ?? ''));
+            if (!nextValue) return undefined;
+            event?.preventDefault?.();
+            ctx.value.set(nextValue);
+            return false;
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  tabs_panel: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.tabs_panel');
+    const ctx = frameManager.useContext(tabsContext);
+    const selected = ctx.value.get() === value;
+    const { triggerId, panelId } = getTabsIds(ctx, value);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'tabpanel',
+          id: panelId,
+          'aria-labelledby': triggerId,
+          hidden: !selected,
+          tabIndex: selected ? 0 : -1,
+          'data-state': selected ? 'active' : 'inactive',
+        },
+        props
+      ),
+      children
+    );
+  },
+  dialog_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(
+        dialogContext,
+        { open, baseId: getDialogBaseId(open), hasTitle: false, hasDescription: false },
+        renderChildren
+      )
+    );
+  },
+  dialog_portal: (children: VNodeInput = []): VNode => vnodePortal(null, children),
+  dialog_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_trigger');
+    const ctx = frameManager.useContext(dialogContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getDialogIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              dialogRestoreTargets.set(ctx.open as object, target);
+            }
+            ctx.open.set(true);
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  dialog_overlay: (props: Record<string, unknown> | null | undefined): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_overlay');
+    const ctx = frameManager.useContext(dialogContext);
+    const open = ctx.open.get();
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          'data-lumina-dialog-overlay': 'true',
+          'data-state': open ? 'open' : 'closed',
+          hidden: !open,
+          onClick: () => {
+            ctx.open.set(false);
+            restoreDialogFocus(ctx);
+          },
+        },
+        props
+      ),
+      []
+    );
+  },
+  dialog_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_content');
+    const ctx = frameManager.useContext(dialogContext);
+    const open = ctx.open.get();
+    const { contentId, titleId, descriptionId } = getDialogIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'dialog',
+          id: contentId,
+          'aria-modal': 'true',
+          'aria-labelledby': ctx.hasTitle ? titleId : undefined,
+          'aria-describedby': ctx.hasDescription ? descriptionId : undefined,
+          autoFocus: open,
+          hidden: !open,
+          tabIndex: -1,
+          'data-state': open ? 'open' : 'closed',
+          onKeyDown: (event?: KeyboardEvent) => {
+            if (trapDialogTabNavigation(event)) {
+              return false;
+            }
+            if (String(event?.key ?? '') !== 'Escape') return undefined;
+            event?.preventDefault?.();
+            ctx.open.set(false);
+            restoreDialogFocus(ctx);
+            return false;
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  dialog_title: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_title');
+    const ctx = frameManager.useContext(dialogContext);
+    ctx.hasTitle = true;
+    const { titleId } = getDialogIds(ctx);
+    return vnodeElement(
+      'h2',
+      mergeProps(
+        {
+          id: titleId,
+          'data-lumina-dialog-title': 'true',
+        },
+        props
+      ),
+      children
+    );
+  },
+  dialog_description: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_description');
+    const ctx = frameManager.useContext(dialogContext);
+    ctx.hasDescription = true;
+    const { descriptionId } = getDialogIds(ctx);
+    return vnodeElement(
+      'p',
+      mergeProps(
+        {
+          id: descriptionId,
+          'data-lumina-dialog-description': 'true',
+        },
+        props
+      ),
+      children
+    );
+  },
+  dialog_close: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.dialog_close');
+    const ctx = frameManager.useContext(dialogContext);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          'data-lumina-dialog-close': 'true',
+          onClick: () => {
+            ctx.open.set(false);
+            restoreDialogFocus(ctx);
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  popover_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.popover_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(popoverContext, { open, baseId: getPopoverBaseId(open) }, renderChildren)
+    );
+  },
+  popover_portal: (children: VNodeInput = []): VNode => {
+    const frameManager = requireActiveFrameManager('render.popover_portal');
+    const ctx = frameManager.useContext(popoverContext);
+    const open = ctx.open.get();
+    const dismissLayer = vnodeElement(
+      'div',
+      {
+        'data-lumina-popover-dismiss': 'true',
+        'data-state': open ? 'open' : 'closed',
+        hidden: !open,
+        style: {
+          position: 'fixed',
+          inset: '0',
+          background: 'transparent',
+          zIndex: '1000',
+        },
+        onClick: () => {
+          ctx.open.set(false);
+          restorePopoverFocus(ctx);
+        },
+      },
+      []
+    );
+    return vnodePortal(null, [dismissLayer, ...normalizeVNodeChildren(resolveChildrenInput(children))]);
+  },
+  popover_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.popover_trigger');
+    const ctx = frameManager.useContext(popoverContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getPopoverIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              popoverRestoreTargets.set(ctx.open as object, target);
+              popoverAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            const nextOpen = !ctx.open.get();
+            ctx.open.set(nextOpen);
+            if (!nextOpen) {
+              restorePopoverFocus(ctx);
+            }
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  popover_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.popover_content');
+    const ctx = frameManager.useContext(popoverContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getPopoverIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'dialog',
+          id: contentId,
+          'aria-modal': 'false',
+          'aria-labelledby': triggerId,
+          autoFocus: open,
+          hidden: !open,
+          tabIndex: -1,
+          'data-lumina-popover-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getPopoverAnchorRect(ctx), props),
+          onKeyDown: (event?: KeyboardEvent) => {
+            if (String(event?.key ?? '') !== 'Escape') return undefined;
+            event?.preventDefault?.();
+            ctx.open.set(false);
+            restorePopoverFocus(ctx);
+            return false;
+          },
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  menu_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.menu_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(menuContext, { open, baseId: getMenuBaseId(open), order: [] }, renderChildren)
+    );
+  },
+  menu_portal: (children: VNodeInput = []): VNode => {
+    const frameManager = requireActiveFrameManager('render.menu_portal');
+    const ctx = frameManager.useContext(menuContext);
+    const open = ctx.open.get();
+    const dismissLayer = vnodeElement(
+      'div',
+      {
+        'data-lumina-menu-dismiss': 'true',
+        'data-state': open ? 'open' : 'closed',
+        hidden: !open,
+        style: {
+          position: 'fixed',
+          inset: '0',
+          background: 'transparent',
+          zIndex: '1000',
+        },
+        onClick: () => {
+          closeMenu(ctx);
+        },
+      },
+      []
+    );
+    return vnodePortal(null, [dismissLayer, ...normalizeVNodeChildren(resolveChildrenInput(children))]);
+  },
+  menu_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.menu_trigger');
+    const ctx = frameManager.useContext(menuContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getMenuIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          'aria-haspopup': 'menu',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              menuRestoreTargets.set(ctx.open as object, target);
+              menuAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            const nextOpen = !ctx.open.get();
+            ctx.open.set(nextOpen);
+            if (!nextOpen) {
+              restoreMenuFocus(ctx);
+            }
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  menu_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.menu_content');
+    const ctx = frameManager.useContext(menuContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getMenuIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'menu',
+          id: contentId,
+          'aria-labelledby': triggerId,
+          hidden: !open,
+          tabIndex: -1,
+          autoFocus: open,
+          'data-lumina-menu-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getMenuAnchorRect(ctx), props),
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeMenu(ctx);
+              return false;
+            }
+            if (key === 'ArrowDown' || key === 'Home') {
+              event?.preventDefault?.();
+              focusMenuItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.order[0] ?? ''
+              );
+              return false;
+            }
+            if (key === 'ArrowUp' || key === 'End') {
+              event?.preventDefault?.();
+              focusMenuItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.order[ctx.order.length - 1] ?? ''
+              );
+              return false;
+            }
+            return undefined;
+          },
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  menu_item: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.menu_item');
+    const ctx = frameManager.useContext(menuContext);
+    registerMenuValue(ctx, value);
+    const open = ctx.open.get();
+    const isFirst = ctx.order[0] === value;
+    const itemId = getMenuItemId(ctx, value);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: itemId,
+          role: 'menuitem',
+          hidden: !open,
+          tabIndex: open ? 0 : -1,
+          autoFocus: open && isFirst,
+          'data-lumina-menu-item': 'true',
+          'data-state': open ? 'open' : 'closed',
+          onClick: () => {
+            closeMenu(ctx);
+          },
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeMenu(ctx);
+              return false;
+            }
+            if (key === 'Enter' || key === ' ') {
+              event?.preventDefault?.();
+              const click = props?.onClick;
+              if (typeof click === 'function') {
+                click(event as unknown as Event);
+              }
+              closeMenu(ctx);
+              return false;
+            }
+            const nextValue = getMenuNavigationTarget(ctx, value, key);
+            if (!nextValue) return undefined;
+            event?.preventDefault?.();
+            focusMenuItem(
+              (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+              ctx,
+              nextValue
+            );
+            return false;
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  portalBody: (children: VNodeInput = []): VNode => render.portal_body(children),
+  tabsRoot: (value: Signal<string>, renderChildren: () => ComponentRenderable): VNode =>
+    render.tabs_root(value, renderChildren),
+  tabsList: (
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.tabs_list(props, renderChildren),
+  tabsTrigger: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.tabs_trigger(value, props, children),
+  tabsPanel: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.tabs_panel(value, props, children),
+  dialogRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+    render.dialog_root(open, renderChildren),
+  dialogPortal: (children: VNodeInput = []): VNode => render.dialog_portal(children),
+  dialogTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.dialog_trigger(props, children),
+  dialogOverlay: (props: Record<string, unknown> | null | undefined): VNode => render.dialog_overlay(props),
+  dialogContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.dialog_content(props, children),
+  dialogTitle: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.dialog_title(props, children),
+  dialogDescription: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.dialog_description(props, children),
+  dialogClose: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.dialog_close(props, children),
+  popoverRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+    render.popover_root(open, renderChildren),
+  popoverPortal: (children: VNodeInput = []): VNode => render.popover_portal(children),
+  popoverTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.popover_trigger(props, children),
+  popoverContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.popover_content(props, children),
+  menuRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+    render.menu_root(open, renderChildren),
+  menuPortal: (children: VNodeInput = []): VNode => render.menu_portal(children),
+  menuTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.menu_trigger(props, children),
+  menuContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.menu_content(props, children),
+  menuItem: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.menu_item(value, props, children),
   text: (value: unknown): VNode => vnodeText(value),
   element: (tag: string, props?: Record<string, unknown> | null, children: VNodeInput = []): VNode =>
     vnodeElement(tag, props, children),
@@ -6837,11 +8332,7 @@ export const render = {
       onChange: (e: Event) => handler(((e.target as HTMLInputElement | null)?.value ?? '')),
     }),
   props_key: (key: string): Record<string, unknown> => ({ key }),
-  props_merge: (left: unknown, right: unknown): Record<string, unknown> => {
-      const lhs = left && typeof left === 'object' ? (left as Record<string, unknown>) : {};
-      const rhs = right && typeof right === 'object' ? (right as Record<string, unknown>) : {};
-      return { ...lhs, ...rhs };
-    },
+  props_merge: (left: unknown, right: unknown): Record<string, unknown> => mergeProps(left, right),
   dom_get_element_by_id: (id: string): unknown => {
     const doc = (globalThis as { document?: { getElementById?: (value: string) => unknown } }).document;
     if (!doc || typeof doc.getElementById !== 'function') return null;
@@ -6886,12 +8377,13 @@ export const render = {
   ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => {
     if (container == null) return Result.Err('Render container is required');
     const root = new RenderRoot(coerceRenderer(renderer), container);
+    const frameManager = new FrameManager();
     try {
       const fx = new Effect(() => {
-        const node = view();
+        const node = runWithFrameManager(frameManager, view);
         root.update(node);
       });
-      return new ReactiveRenderRoot(root, fx);
+      return new ReactiveRenderRoot(root, fx, frameManager);
     } catch (error) {
       return Result.Err(toRenderErrorMessage(error));
     }
@@ -6903,10 +8395,11 @@ export const render = {
   ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => {
     if (container == null) return Result.Err('Render container is required');
     const root = new RenderRoot(coerceRenderer(renderer), container);
+    const frameManager = new FrameManager();
     let initialized = false;
     try {
       const fx = new Effect(() => {
-        const node = view();
+        const node = runWithFrameManager(frameManager, view);
         if (!initialized) {
           root.hydrate(node);
           initialized = true;
@@ -6914,7 +8407,7 @@ export const render = {
         }
         root.update(node);
       });
-      return new ReactiveRenderRoot(root, fx);
+      return new ReactiveRenderRoot(root, fx, frameManager);
     } catch (error) {
       return Result.Err(toRenderErrorMessage(error));
     }
@@ -6952,6 +8445,106 @@ export const set = <T>(signal: Signal<T>, value: T): boolean => render.set(signa
 export const createMemo = <T>(compute: () => T): Memo<T> => render.memo(compute);
 export const createEffect = (fn: (onCleanup: (cleanup: ReactiveCleanup) => void) => void | ReactiveCleanup): Effect =>
   render.effect(fn);
+export const component = <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P, key?: unknown): VNode =>
+  render.component(componentFn, props, key);
+export const component_keyed = <P>(
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P,
+  key: unknown
+): VNode => render.component_keyed(componentFn, props, key);
+export const createContext = <T>(defaultValue?: T): ContextToken<T> => render.create_context(defaultValue);
+export const create_required_context = <T>(): ContextToken<T> => render.create_required_context<T>();
+export const withContext = <T>(context: ContextToken<T>, value: T, renderChildren: () => ComponentRenderable): VNode =>
+  render.with_context(context, value, renderChildren);
+export const useContext = <T>(context: ContextToken<T>): T => render.use_context(context);
+export const state = <T>(initial: T): Signal<T> => render.state(initial);
+export const remember = <T>(compute: () => T): T => render.remember(compute);
+export const children = (input: unknown): VNode[] => render.children(input);
+export const slot = <P>(
+  slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
+  props: P,
+  fallback?: VNodeInput
+): VNode => render.slot(slotValue, props, fallback);
+export const slot_or = <P>(
+  slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
+  props: P,
+  fallback: VNodeInput
+): VNode => render.slot_or(slotValue, props, fallback);
+export const compose_handlers = <Args extends unknown[]>(
+  left: ((...args: Args) => unknown) | null | undefined,
+  right: ((...args: Args) => unknown) | null | undefined
+): ((...args: Args) => unknown) | undefined => render.compose_handlers(left, right);
+export const portal = (target: string | null | undefined, children: VNodeInput = []): VNode =>
+  render.portal(target, children);
+export const portalBody = (children: VNodeInput = []): VNode => render.portal_body(children);
+export const tabsRoot = (value: Signal<string>, renderChildren: () => ComponentRenderable): VNode =>
+  render.tabs_root(value, renderChildren);
+export const tabsList = (
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.tabs_list(props, renderChildren);
+export const tabsTrigger = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.tabs_trigger(value, props, children);
+export const tabsPanel = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.tabs_panel(value, props, children);
+export const dialogRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+  render.dialog_root(open, renderChildren);
+export const dialogPortal = (children: VNodeInput = []): VNode => render.dialog_portal(children);
+export const dialogTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.dialog_trigger(props, children);
+export const dialogOverlay = (props: Record<string, unknown> | null | undefined): VNode =>
+  render.dialog_overlay(props);
+export const dialogContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.dialog_content(props, children);
+export const dialogTitle = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.dialog_title(props, children);
+export const dialogDescription = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.dialog_description(props, children);
+export const dialogClose = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.dialog_close(props, children);
+export const popoverRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+  render.popover_root(open, renderChildren);
+export const popoverPortal = (children: VNodeInput = []): VNode => render.popover_portal(children);
+export const popoverTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.popover_trigger(props, children);
+export const popoverContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.popover_content(props, children);
+export const menuRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+  render.menu_root(open, renderChildren);
+export const menuPortal = (children: VNodeInput = []): VNode => render.menu_portal(children);
+export const menuTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.menu_trigger(props, children);
+export const menuContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.menu_content(props, children);
+export const menuItem = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.menu_item(value, props, children);
 export const vnode = (tag: string, attrs?: Record<string, unknown> | null, children: VNodeInput = []): VNode =>
   render.element(tag, attrs, children);
 export const text = (value: unknown): VNode => render.text(value);

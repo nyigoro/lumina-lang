@@ -12,6 +12,50 @@ pub fn vnode(tag: string, attrs: any, children: any) -> VNode {
   render.element(tag, attrs, children)
 }
 
+pub fn component<P>(renderFn: fn(P) -> VNode, props: P) -> VNode {
+  render.component(renderFn, props)
+}
+
+pub fn component_keyed<P>(renderFn: fn(P) -> VNode, props: P, key: any) -> VNode {
+  render.component_keyed(renderFn, props, key)
+}
+
+pub fn createContext<T>(defaultValue: T) -> any {
+  render.create_context(defaultValue)
+}
+
+pub fn createRequiredContext() -> any {
+  render.create_required_context()
+}
+
+pub fn withContext<T>(context: any, value: T, renderChildren: fn() -> VNode) -> VNode {
+  render.with_context(context, value, renderChildren)
+}
+
+pub fn useContext<T>(context: any) -> T {
+  render.use_context(context)
+}
+
+pub fn state<T>(initial: T) -> Signal<T> {
+  render.state(initial)
+}
+
+pub fn remember<T>(compute: fn() -> T) -> T {
+  render.remember(compute)
+}
+
+pub fn children(input: any) -> any {
+  render.children(input)
+}
+
+pub fn slot<P>(slotValue: any, props: P) -> VNode {
+  render.slot(slotValue, props)
+}
+
+pub fn slot_or<P>(slotValue: any, props: P, fallback: any) -> VNode {
+  render.slot_or(slotValue, props, fallback)
+}
+
 pub fn props_empty() -> any {
   render.props_empty()
 }
@@ -38,6 +82,102 @@ pub fn props_on_click_dec(signal: Signal<i32>) -> any {
 
 pub fn props_merge(left: any, right: any) -> any {
   render.props_merge(left, right)
+}
+
+pub fn composeHandlers(left: any, right: any) -> any {
+  render.compose_handlers(left, right)
+}
+
+pub fn portal(target: any, children: any) -> VNode {
+  render.portal(target, children)
+}
+
+pub fn portalBody(children: any) -> VNode {
+  render.portalBody(children)
+}
+
+pub fn tabsRoot(value: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.tabsRoot(value, renderChildren)
+}
+
+pub fn tabsList(props: any, renderChildren: fn() -> any) -> VNode {
+  render.tabsList(props, renderChildren)
+}
+
+pub fn tabsTrigger(value: string, props: any, children: any) -> VNode {
+  render.tabsTrigger(value, props, children)
+}
+
+pub fn tabsPanel(value: string, props: any, children: any) -> VNode {
+  render.tabsPanel(value, props, children)
+}
+
+pub fn dialogRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.dialogRoot(open, renderChildren)
+}
+
+pub fn dialogPortal(children: any) -> VNode {
+  render.dialogPortal(children)
+}
+
+pub fn dialogTrigger(props: any, children: any) -> VNode {
+  render.dialogTrigger(props, children)
+}
+
+pub fn dialogOverlay(props: any) -> VNode {
+  render.dialogOverlay(props)
+}
+
+pub fn dialogContent(props: any, children: any) -> VNode {
+  render.dialogContent(props, children)
+}
+
+pub fn dialogTitle(props: any, children: any) -> VNode {
+  render.dialogTitle(props, children)
+}
+
+pub fn dialogDescription(props: any, children: any) -> VNode {
+  render.dialogDescription(props, children)
+}
+
+pub fn dialogClose(props: any, children: any) -> VNode {
+  render.dialogClose(props, children)
+}
+
+pub fn popoverRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.popoverRoot(open, renderChildren)
+}
+
+pub fn popoverPortal(children: any) -> VNode {
+  render.popoverPortal(children)
+}
+
+pub fn popoverTrigger(props: any, children: any) -> VNode {
+  render.popoverTrigger(props, children)
+}
+
+pub fn popoverContent(props: any, children: any) -> VNode {
+  render.popoverContent(props, children)
+}
+
+pub fn menuRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.menuRoot(open, renderChildren)
+}
+
+pub fn menuPortal(children: any) -> VNode {
+  render.menuPortal(children)
+}
+
+pub fn menuTrigger(props: any, children: any) -> VNode {
+  render.menuTrigger(props, children)
+}
+
+pub fn menuContent(props: any, children: any) -> VNode {
+  render.menuContent(props, children)
+}
+
+pub fn menuItem(value: string, props: any, children: any) -> VNode {
+  render.menuItem(value, props, children)
 }
 
 pub fn props_id(id: string) -> any {

@@ -1,0 +1,17 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.popoverRoot(open, renderChildren)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.popoverPortal(children)
+}
+
+pub fn trigger(props: any, children: any) -> VNode {
+  render.popoverTrigger(props, children)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.popoverContent(props, children)
+}

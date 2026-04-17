@@ -33,7 +33,7 @@ export interface ParityResult {
 
 const grammarPath = path.resolve(__dirname, '../../examples/lumina.peg');
 const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
-const parser = compileGrammar(luminaGrammar);
+const parser = compileGrammar(luminaGrammar, { cache: true });
 const tmpDir = path.join(os.tmpdir(), 'lumina-parity');
 
 const parseProgram = (source: string): LuminaProgram => parser.parse(source.trim() + '\n') as LuminaProgram;
