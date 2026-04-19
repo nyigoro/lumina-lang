@@ -109,6 +109,15 @@ describe('@std/render module', () => {
         let _context = render.create_required_context();
         let _children = render.children([render.text("child")]);
         let _slot = render.slot_or(0, 0, render.text("fallback"));
+        let _checked = render.props_checked(true);
+        let _type = render.props_type("checkbox");
+        let _name = render.props_name("contact");
+        let _toggle = render.props_on_checked_change(fn(next: bool) -> void {
+          let _ = next;
+        });
+        let _submit = render.props_on_submit(fn() -> void {
+          let _ = 0;
+        });
 
         let tabs = render.tabsRoot(active, || [
           render.tabsList(render.props_class("tabs"), || [
@@ -133,6 +142,21 @@ describe('@std/render module', () => {
           ])
         ]);
 
+        let tooltip = render.tooltipRoot(open, || [
+          render.tooltipTrigger(render.props_class("tooltip-trigger"), [render.text("Hover me")]),
+          render.tooltipPortal([
+            render.tooltipContent(render.props_class("tooltip"), [render.text("Helpful copy")])
+          ])
+        ]);
+
+        let toast = render.toastRoot(open, || render.toastPortal([
+          render.toastContent(render.props_class("toast"), [
+            render.toastTitle(render.props_class("toast-title"), [render.text("Saved")]),
+            render.toastDescription(render.props_class("toast-description"), [render.text("Draft updated")]),
+            render.toastClose(render.props_class("toast-close"), [render.text("Dismiss")])
+          ])
+        ]));
+
         let menu = render.menuRoot(open, || [
           render.menuTrigger(render.props_class("menu-trigger"), [render.text("Open menu")]),
           render.menuPortal([
@@ -142,7 +166,65 @@ describe('@std/render module', () => {
           ])
         ]);
 
-        render.portalBody([tabs, dialog, popover, menu])
+        let checked = render.signal(true);
+        let choice = render.signal("email");
+        let selectOpen = render.signal(false);
+        let selectValue = render.signal("email");
+        let comboboxOpen = render.signal(false);
+        let comboboxValue = render.signal("email");
+        let comboboxQuery = render.signal("em");
+        let multiselectOpen = render.signal(false);
+        let multiselectValues = render.signal(["email"]);
+
+        let checkbox = render.checkboxRoot(checked, render.props_class("checkbox"), || [
+          render.checkboxIndicator(render.props_class("checkbox-indicator"), [render.text("x")]),
+          render.text("Accept terms")
+        ]);
+
+        let selectUi = render.selectRoot(selectOpen, selectValue, || [
+          render.selectTrigger(render.props_class("select-trigger"), [render.text("Choose channel")]),
+          render.selectPortal([
+            render.selectContent(render.props_class("select-content"), [
+              render.selectItem("email", render.props_class("select-item"), || [
+                render.selectIndicator(render.props_class("select-indicator"), [render.text("o")]),
+                render.text("Email")
+              ])
+            ])
+          ])
+        ]);
+
+        let comboboxUi = render.comboboxRoot(comboboxOpen, comboboxValue, comboboxQuery, || [
+          render.comboboxInput(render.props_placeholder("Search channels"), []),
+          render.comboboxPortal([
+            render.comboboxContent(render.props_class("combobox-content"), [
+              render.comboboxItem("email", render.props_class("combobox-item"), || [
+                render.comboboxIndicator(render.props_class("combobox-indicator"), [render.text("o")]),
+                render.text("Email")
+              ])
+            ])
+          ])
+        ]);
+
+        let multiselectUi = render.multiselectRoot(multiselectOpen, multiselectValues, || [
+          render.multiselectTrigger(render.props_class("multiselect-trigger"), [render.text("Choose channels")]),
+          render.multiselectPortal([
+            render.multiselectContent(render.props_class("multiselect-content"), [
+              render.multiselectItem("email", render.props_class("multiselect-item"), || [
+                render.multiselectIndicator(render.props_class("multiselect-indicator"), [render.text("x")]),
+                render.text("Email")
+              ])
+            ])
+          ])
+        ]);
+
+        let radio = render.radioGroup(choice, render.props_class("radio-group"), || [
+          render.radioItem("email", render.props_class("radio-item"), || [
+            render.radioIndicator(render.props_class("radio-indicator"), [render.text("o")]),
+            render.text("Email")
+          ])
+        ]);
+
+        render.portalBody([tabs, dialog, popover, tooltip, toast, menu, selectUi, comboboxUi, multiselectUi, checkbox, radio])
       }
     `.trim() + '\n';
 

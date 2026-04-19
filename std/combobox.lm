@@ -1,0 +1,25 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, value: Signal<string>, query: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.comboboxRoot(open, value, query, renderChildren)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.comboboxPortal(children)
+}
+
+pub fn input(props: any, children: any) -> VNode {
+  render.comboboxInput(props, children)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.comboboxContent(props, children)
+}
+
+pub fn item(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.comboboxItem(value, props, renderChildren)
+}
+
+pub fn indicator(props: any, children: any) -> VNode {
+  render.comboboxIndicator(props, children)
+}

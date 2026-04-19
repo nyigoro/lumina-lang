@@ -102,6 +102,8 @@ describe('runtime render module', () => {
   test('DOM bridge helpers create props and resolve container', () => {
     const plus = jest.fn();
     const minus = jest.fn();
+    const onChecked = jest.fn();
+    const onSubmit = jest.fn();
     const combined = render.props_merge(
       render.props_class('counter'),
       render.props_on_click(() => plus())
@@ -122,6 +124,18 @@ describe('runtime render module', () => {
     const decProps = render.props_on_click_dec(signal) as { onClick?: () => void };
     decProps.onClick?.();
     expect(render.get(signal)).toBe(5);
+
+    expect(render.props_checked(true)).toEqual({ checked: true });
+    expect(render.props_type('checkbox')).toEqual({ type: 'checkbox' });
+    expect(render.props_name('choice')).toEqual({ name: 'choice' });
+    const checkedProps = render.props_on_checked_change(onChecked) as { onChange?: (event: Event) => void };
+    checkedProps.onChange?.({ target: { checked: true } } as unknown as Event);
+    expect(onChecked).toHaveBeenCalledWith(true);
+    const preventDefault = jest.fn();
+    const submitProps = render.props_on_submit(onSubmit) as { onSubmit?: (event: Event) => void };
+    submitProps.onSubmit?.({ preventDefault } as unknown as Event);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
 
     const documentLike = {
       getElementById: (id: string) => (id === 'app' ? { id, clicked: minus } : null),

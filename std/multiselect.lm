@@ -1,0 +1,25 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, values: Signal<any>, renderChildren: fn() -> any) -> VNode {
+  render.multiselectRoot(open, values, renderChildren)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.multiselectPortal(children)
+}
+
+pub fn trigger(props: any, children: any) -> VNode {
+  render.multiselectTrigger(props, children)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.multiselectContent(props, children)
+}
+
+pub fn item(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.multiselectItem(value, props, renderChildren)
+}
+
+pub fn indicator(props: any, children: any) -> VNode {
+  render.multiselectIndicator(props, children)
+}

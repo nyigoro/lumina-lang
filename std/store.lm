@@ -1,0 +1,58 @@
+import {
+  createMemo as rx_createMemo,
+  createSignal as rx_createSignal,
+  get as rx_get,
+  set as rx_set,
+  updateSignal as rx_updateSignal
+} from "@std/reactive";
+import { render } from "@std";
+
+pub struct Store<T> {
+  value: Signal<T>
+}
+
+pub fn createStore<T>(initial: T) -> Store<T> {
+  Store { value: rx_createSignal(initial) }
+}
+
+pub fn fromSignal<T>(value: Signal<T>) -> Store<T> {
+  Store { value: value }
+}
+
+pub fn toSignal<T>(store: Store<T>) -> Signal<T> {
+  store.value
+}
+
+pub fn get<T>(store: Store<T>) -> T {
+  rx_get(store.value)
+}
+
+pub fn set<T>(store: Store<T>, value: T) -> bool {
+  rx_set(store.value, value)
+}
+
+pub fn update<T>(store: Store<T>, updater: fn(T) -> T) -> T {
+  rx_updateSignal(store.value, updater)
+}
+
+pub fn selectMemo<T, U>(store: Store<T>, selector: fn(T) -> U) -> Memo<U> {
+  rx_createMemo(fn() -> U {
+    selector(rx_get(store.value))
+  })
+}
+
+pub fn createContext<T>(defaultStore: Store<T>) -> any {
+  render.create_context(defaultStore)
+}
+
+pub fn createRequiredContext() -> any {
+  render.create_required_context()
+}
+
+pub fn provider(context: any, value: any, renderChildren: fn() -> any) -> VNode {
+  render.with_context(context, value, renderChildren)
+}
+
+pub fn useStore(context: any) -> any {
+  render.use_context(context)
+}

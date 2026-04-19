@@ -4682,12 +4682,19 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const propsIdType: Type = fnType([primitive('string')], primitive('any'));
     const propsStyleType: Type = fnType([primitive('string')], primitive('any'));
     const propsValueType: Type = fnType([primitive('string')], primitive('any'));
+    const propsCheckedType: Type = fnType([primitive('bool')], primitive('any'));
+    const propsTypeType: Type = fnType([primitive('string')], primitive('any'));
+    const propsNameType: Type = fnType([primitive('string')], primitive('any'));
     const propsPlaceholderType: Type = fnType([primitive('string')], primitive('any'));
     const propsHrefType: Type = fnType([primitive('string')], primitive('any'));
     const propsDisabledType: Type = fnType([primitive('bool')], primitive('any'));
     const propsKeyType: Type = fnType([primitive('string')], primitive('any'));
     const propsOnInputType: Type = fnType([fnType([primitive('string')], primitive('void'))], primitive('any'));
     const propsOnChangeType: Type = fnType([fnType([primitive('string')], primitive('void'))], primitive('any'));
+    const checkedChangeReturnT = freshTypeVar();
+    const submitReturnT = freshTypeVar();
+    const propsOnCheckedChangeType: Type = fnType([fnType([primitive('bool')], checkedChangeReturnT)], primitive('any'));
+    const propsOnSubmitType: Type = fnType([fnType([], submitReturnT)], primitive('any'));
     const propsMergeType: Type = fnType([primitive('any'), primitive('any')], primitive('any'));
     const domGetElementByIdType: Type = fnType([primitive('string')], primitive('any'));
     const componentPropsT = freshTypeVar();
@@ -4727,11 +4734,53 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const popoverPortalType: Type = fnType([primitive('any')], vnodeT);
     const popoverTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const popoverContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const tooltipRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
+    const tooltipPortalType: Type = fnType([primitive('any')], vnodeT);
+    const tooltipTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const tooltipContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const toastRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
+    const toastPortalType: Type = fnType([primitive('any')], vnodeT);
+    const toastContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const toastTitleType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const toastDescriptionType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const toastCloseType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const menuRootType: Type = fnType([adt('Signal', [primitive('bool')]), renderChildrenType], vnodeT);
     const menuPortalType: Type = fnType([primitive('any')], vnodeT);
     const menuTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const menuContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const menuItemType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], vnodeT);
+    const selectRootType: Type = fnType([adt('Signal', [primitive('bool')]), adt('Signal', [primitive('string')]), renderChildrenType], vnodeT);
+    const selectPortalType: Type = fnType([primitive('any')], vnodeT);
+    const selectTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const selectContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const selectItemType: Type = fnType([primitive('string'), primitive('any'), renderChildrenType], vnodeT);
+    const selectIndicatorType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const comboboxRootType: Type = fnType([
+      adt('Signal', [primitive('bool')]),
+      adt('Signal', [primitive('string')]),
+      adt('Signal', [primitive('string')]),
+      renderChildrenType
+    ], vnodeT);
+    const comboboxPortalType: Type = fnType([primitive('any')], vnodeT);
+    const comboboxInputType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const comboboxContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const comboboxItemType: Type = fnType([primitive('string'), primitive('any'), renderChildrenType], vnodeT);
+    const comboboxIndicatorType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const multiselectRootType: Type = fnType([
+      adt('Signal', [primitive('bool')]),
+      adt('Signal', [primitive('any')]),
+      renderChildrenType
+    ], vnodeT);
+    const multiselectPortalType: Type = fnType([primitive('any')], vnodeT);
+    const multiselectTriggerType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const multiselectContentType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const multiselectItemType: Type = fnType([primitive('string'), primitive('any'), renderChildrenType], vnodeT);
+    const multiselectIndicatorType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const checkboxRootType: Type = fnType([adt('Signal', [primitive('bool')]), primitive('any'), renderChildrenType], vnodeT);
+    const checkboxIndicatorType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
+    const radioGroupType: Type = fnType([adt('Signal', [primitive('string')]), primitive('any'), renderChildrenType], vnodeT);
+    const radioItemType: Type = fnType([primitive('string'), primitive('any'), renderChildrenType], vnodeT);
+    const radioIndicatorType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const isVNodeType: Type = fnType([primitive('any')], primitive('bool'));
     const serializeType: Type = fnType([vnodeT], primitive('string'));
     const parseType: Type = fnType([primitive('string')], vnodeT);
@@ -5032,6 +5081,39 @@ export function createStdModuleRegistry(): ModuleRegistry {
           ),
         ],
         [
+          'props_checked',
+          moduleFunctionWithScheme(
+            'props_checked',
+            ['bool'],
+            'any',
+            schemeFromVars(propsCheckedType, []),
+            ['checked'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_type',
+          moduleFunctionWithScheme(
+            'props_type',
+            ['string'],
+            'any',
+            schemeFromVars(propsTypeType, []),
+            ['type'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_name',
+          moduleFunctionWithScheme(
+            'props_name',
+            ['string'],
+            'any',
+            schemeFromVars(propsNameType, []),
+            ['name'],
+            'std://render'
+          ),
+        ],
+        [
           'props_placeholder',
           moduleFunctionWithScheme(
             'props_placeholder',
@@ -5093,6 +5175,28 @@ export function createStdModuleRegistry(): ModuleRegistry {
             ['fn(string) -> void'],
             'any',
             schemeFromVars(propsOnChangeType, []),
+            ['handler'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_on_checked_change',
+          moduleFunctionWithScheme(
+            'props_on_checked_change',
+            ['fn(bool) -> any'],
+            'any',
+            schemeFromVars(propsOnCheckedChangeType, [checkedChangeReturnT]),
+            ['handler'],
+            'std://render'
+          ),
+        ],
+        [
+          'props_on_submit',
+          moduleFunctionWithScheme(
+            'props_on_submit',
+            ['fn() -> any'],
+            'any',
+            schemeFromVars(propsOnSubmitType, [submitReturnT]),
             ['handler'],
             'std://render'
           ),
@@ -5450,6 +5554,116 @@ export function createStdModuleRegistry(): ModuleRegistry {
           ),
         ],
         [
+          'tooltipRoot',
+          moduleFunctionWithScheme(
+            'tooltipRoot',
+            ['Signal<bool>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(tooltipRootType, []),
+            ['open', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'tooltipPortal',
+          moduleFunctionWithScheme(
+            'tooltipPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(tooltipPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'tooltipTrigger',
+          moduleFunctionWithScheme(
+            'tooltipTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(tooltipTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'tooltipContent',
+          moduleFunctionWithScheme(
+            'tooltipContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(tooltipContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastRoot',
+          moduleFunctionWithScheme(
+            'toastRoot',
+            ['Signal<bool>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(toastRootType, []),
+            ['open', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastPortal',
+          moduleFunctionWithScheme(
+            'toastPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(toastPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastContent',
+          moduleFunctionWithScheme(
+            'toastContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(toastContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastTitle',
+          moduleFunctionWithScheme(
+            'toastTitle',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(toastTitleType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastDescription',
+          moduleFunctionWithScheme(
+            'toastDescription',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(toastDescriptionType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'toastClose',
+          moduleFunctionWithScheme(
+            'toastClose',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(toastCloseType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
           'menuRoot',
           moduleFunctionWithScheme(
             'menuRoot',
@@ -5501,6 +5715,259 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'VNode',
             schemeFromVars(menuItemType, []),
             ['value', 'props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectRoot',
+          moduleFunctionWithScheme(
+            'selectRoot',
+            ['Signal<bool>', 'Signal<string>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(selectRootType, []),
+            ['open', 'value', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectPortal',
+          moduleFunctionWithScheme(
+            'selectPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(selectPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectTrigger',
+          moduleFunctionWithScheme(
+            'selectTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(selectTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectContent',
+          moduleFunctionWithScheme(
+            'selectContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(selectContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectItem',
+          moduleFunctionWithScheme(
+            'selectItem',
+            ['string', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(selectItemType, []),
+            ['value', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'selectIndicator',
+          moduleFunctionWithScheme(
+            'selectIndicator',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(selectIndicatorType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxRoot',
+          moduleFunctionWithScheme(
+            'comboboxRoot',
+            ['Signal<bool>', 'Signal<string>', 'Signal<string>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(comboboxRootType, []),
+            ['open', 'value', 'query', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxPortal',
+          moduleFunctionWithScheme(
+            'comboboxPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(comboboxPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxInput',
+          moduleFunctionWithScheme(
+            'comboboxInput',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(comboboxInputType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxContent',
+          moduleFunctionWithScheme(
+            'comboboxContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(comboboxContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxItem',
+          moduleFunctionWithScheme(
+            'comboboxItem',
+            ['string', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(comboboxItemType, []),
+            ['value', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'comboboxIndicator',
+          moduleFunctionWithScheme(
+            'comboboxIndicator',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(comboboxIndicatorType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectRoot',
+          moduleFunctionWithScheme(
+            'multiselectRoot',
+            ['Signal<bool>', 'Signal<any>', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(multiselectRootType, []),
+            ['open', 'values', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectPortal',
+          moduleFunctionWithScheme(
+            'multiselectPortal',
+            ['any'],
+            'VNode',
+            schemeFromVars(multiselectPortalType, []),
+            ['children'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectTrigger',
+          moduleFunctionWithScheme(
+            'multiselectTrigger',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(multiselectTriggerType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectContent',
+          moduleFunctionWithScheme(
+            'multiselectContent',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(multiselectContentType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectItem',
+          moduleFunctionWithScheme(
+            'multiselectItem',
+            ['string', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(multiselectItemType, []),
+            ['value', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'multiselectIndicator',
+          moduleFunctionWithScheme(
+            'multiselectIndicator',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(multiselectIndicatorType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'checkboxRoot',
+          moduleFunctionWithScheme(
+            'checkboxRoot',
+            ['Signal<bool>', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(checkboxRootType, []),
+            ['checked', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'checkboxIndicator',
+          moduleFunctionWithScheme(
+            'checkboxIndicator',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(checkboxIndicatorType, []),
+            ['props', 'children'],
+            'std://render'
+          ),
+        ],
+        [
+          'radioGroup',
+          moduleFunctionWithScheme(
+            'radioGroup',
+            ['Signal<string>', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(radioGroupType, []),
+            ['value', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'radioItem',
+          moduleFunctionWithScheme(
+            'radioItem',
+            ['string', 'any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(radioItemType, []),
+            ['value', 'props', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'radioIndicator',
+          moduleFunctionWithScheme(
+            'radioIndicator',
+            ['any', 'any'],
+            'VNode',
+            schemeFromVars(radioIndicatorType, []),
+            ['props', 'children'],
             'std://render'
           ),
         ],

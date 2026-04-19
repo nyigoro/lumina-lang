@@ -64,6 +64,11 @@ class FakeElement extends FakeNode {
   style: Record<string, unknown> & { setProperty: (name: string, value: string) => void };
   readonly ownerDocument: FakeDocument;
   boundingRect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  value = '';
+  checked = false;
+  disabled = false;
+  name = '';
+  type = '';
 
   constructor(tagName: string, ownerDocument: FakeDocument) {
     super();
@@ -214,6 +219,49 @@ describe('render DOM renderer', () => {
 
     expect(button.listeners.get('click')).toBe(onClickB);
     expect(button.attributes.get('title')).toBe('b');
+  });
+
+  test('controlled form props update checkbox state and submit handling', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const accepted = render.signal(false);
+    const submit = jest.fn();
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.element('form', render.props_on_submit(submit), [
+        render.element(
+          'input',
+          render.props_merge(
+            render.props_type('checkbox'),
+            render.props_merge(
+              render.props_checked(render.get(accepted)),
+              render.props_on_checked_change((next) => {
+                render.set(accepted, next);
+              })
+            )
+          ),
+          []
+        ),
+      ])
+    );
+
+    const form = container.childNodes[0] as FakeElement;
+    const input = form.childNodes[0] as FakeElement;
+    expect(input.type).toBe('checkbox');
+    expect(input.checked).toBe(false);
+
+    input.listeners.get('change')?.({ target: { checked: true } } as Event);
+    await Promise.resolve();
+    expect(render.get(accepted)).toBe(true);
+    expect(input.checked).toBe(true);
+
+    const preventDefault = jest.fn();
+    form.listeners.get('submit')?.({ preventDefault } as Event);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    render.dispose_reactive(mounted);
   });
 
   test('mount_reactive updates on signal changes', async () => {
@@ -855,6 +903,144 @@ describe('render DOM renderer', () => {
     expect(fakeDocument.body.childNodes).toHaveLength(0);
   });
 
+  test('headless tooltip opens on hover/focus, positions from the trigger, and closes on leave/blur', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const open = render.signal(false);
+    const externalEnter = jest.fn();
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.tooltip_root(open, () =>
+        render.element('section', null, [
+          render.tooltip_trigger({ className: 'tooltip-trigger', onMouseEnter: externalEnter }, [render.text('Hover target')]),
+          render.tooltip_portal([
+            render.tooltip_content({ className: 'tooltip', side: 'top', align: 'start', offset: 6 }, [
+              render.text('Helpful copy'),
+            ]),
+          ]),
+        ])
+      )
+    );
+
+    const section = container.childNodes[0] as FakeElement;
+    const trigger = section.childNodes[0] as FakeElement;
+    trigger.boundingRect = { left: 88, top: 120, right: 148, bottom: 152, width: 60, height: 32 };
+
+    expect(render.get(open)).toBe(false);
+    expect(trigger.attributes.get('data-state')).toBe('closed');
+
+    trigger.listeners.get('mouseenter')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+
+    const host = fakeDocument.body.childNodes[0] as FakeElement;
+    const content = host.childNodes[0] as FakeElement;
+
+    expect(externalEnter).toHaveBeenCalledTimes(1);
+    expect(render.get(open)).toBe(true);
+    expect(trigger.attributes.get('aria-describedby')).toBe(content.attributes.get('id'));
+    expect(trigger.attributes.get('data-state')).toBe('open');
+    expect(content.attributes.get('role')).toBe('tooltip');
+    expect(content.attributes.get('data-lumina-tooltip-content')).toBe('true');
+    expect(content.attributes.get('data-side')).toBe('top');
+    expect(content.style.position).toBe('fixed');
+    expect(content.style.top).toBe('114px');
+    expect(content.style.left).toBe('88px');
+    expect(isHidden(content)).toBe(false);
+    expect(content.childNodes[0]?.textContent).toBe('Helpful copy');
+
+    trigger.listeners.get('mouseleave')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+
+    expect(render.get(open)).toBe(false);
+    expect(trigger.attributes.get('aria-describedby')).toBeUndefined();
+    expect(trigger.attributes.get('data-state')).toBe('closed');
+    expect(isHidden(content)).toBe(true);
+
+    trigger.listeners.get('focus')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+    expect(render.get(open)).toBe(true);
+    expect(isHidden(content)).toBe(false);
+
+    trigger.listeners.get('blur')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+    expect(render.get(open)).toBe(false);
+    expect(isHidden(content)).toBe(true);
+
+    render.dispose_reactive(mounted);
+    expect(fakeDocument.body.childNodes).toHaveLength(0);
+  });
+
+  test('headless toast portals content, supports close, and auto-dismisses', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    let mounted: { dispose?: () => void } | undefined;
+    try {
+      const fakeDocument = new FakeDocument();
+      const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+      const container = fakeDocument.createElement('div');
+      const open = render.signal(true);
+      const externalClose = jest.fn();
+      const isHidden = (node: FakeElement): boolean =>
+        node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+      mounted = render.mount_reactive(renderer, container, () =>
+        render.toast_root(open, () =>
+          render.toast_portal([
+            render.toast_content({ className: 'toast', duration: 500 }, [
+              render.toast_title(null, [render.text('Saved')]),
+              render.toast_description(null, [render.text('Draft updated')]),
+              render.toast_close({ onClick: externalClose }, [render.text('Dismiss')]),
+            ]),
+          ])
+        )
+      );
+
+      const anchor = container.childNodes[0] as FakeElement;
+      const host = fakeDocument.body.childNodes[0] as FakeElement;
+      const content = host.childNodes[0] as FakeElement;
+      const title = content.childNodes[0] as FakeElement;
+      const description = content.childNodes[1] as FakeElement;
+      const close = content.childNodes[2] as FakeElement;
+
+      expect(anchor.tagName).toBe('lumina-portal-anchor');
+      expect(content.attributes.get('role')).toBe('status');
+      expect(content.attributes.get('data-lumina-toast-content')).toBe('true');
+      expect(content.attributes.get('aria-live')).toBe('polite');
+      expect(content.attributes.get('aria-labelledby')).toBe(title.attributes.get('id'));
+      expect(content.attributes.get('aria-describedby')).toBe(description.attributes.get('id'));
+      expect(content.style.position).toBe('fixed');
+      expect(content.style.top).toBe('16px');
+      expect(content.style.right).toBe('16px');
+      expect(isHidden(content)).toBe(false);
+
+      close.listeners.get('click')?.({ currentTarget: close } as unknown as Event);
+      await Promise.resolve();
+
+      expect(externalClose).toHaveBeenCalledTimes(1);
+      expect(render.get(open)).toBe(false);
+      expect(isHidden(content)).toBe(true);
+
+      render.set(open, true);
+      await Promise.resolve();
+      expect(isHidden(content)).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(render.get(open)).toBe(false);
+      expect(isHidden(content)).toBe(true);
+
+      render.dispose_reactive(mounted);
+      expect(fakeDocument.body.childNodes).toHaveLength(0);
+    } finally {
+      if (mounted && typeof mounted.dispose === 'function') {
+        mounted.dispose();
+      }
+      jest.useRealTimers();
+    }
+  });
+
   test('headless menu opens in a portal, supports keyboard navigation, and selects items', async () => {
     const fakeDocument = new FakeDocument();
     const renderer = render.create_dom_renderer({ document: fakeDocument as never });
@@ -964,6 +1150,421 @@ describe('render DOM renderer', () => {
     expect(fakeDocument.body.childNodes).toHaveLength(0);
   });
 
+  test('headless select opens in a portal, selects items, and supports keyboard navigation', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const open = render.signal(false);
+    const value = render.signal('email');
+    const selected: string[] = [];
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.select_root(open, value, () =>
+        render.element('section', null, [
+          render.select_trigger(null, [render.text('Choose channel')]),
+          render.select_portal([
+            render.select_content({ className: 'select', side: 'bottom', align: 'start', offset: 10 }, [
+              render.select_item('email', { onClick: () => selected.push('email') }, () => [
+                render.select_indicator(null, [render.text('o')]),
+                render.text('Email'),
+              ]),
+              render.select_item('sms', { onClick: () => selected.push('sms') }, () => [
+                render.select_indicator(null, [render.text('o')]),
+                render.text('SMS'),
+              ]),
+              render.select_item('push', { onClick: () => selected.push('push') }, () => [
+                render.select_indicator(null, [render.text('o')]),
+                render.text('Push'),
+              ]),
+            ]),
+          ]),
+        ])
+      )
+    );
+
+    const section = container.childNodes[0] as FakeElement;
+    const trigger = section.childNodes[0] as FakeElement;
+    trigger.boundingRect = { left: 64, top: 32, right: 164, bottom: 68, width: 100, height: 36 };
+
+    trigger.listeners.get('click')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+
+    const host = fakeDocument.body.childNodes[0] as FakeElement;
+    const dismiss = host.childNodes[0] as FakeElement;
+    const content = host.childNodes[1] as FakeElement;
+    const itemEmail = content.childNodes[0] as FakeElement;
+    const itemSms = content.childNodes[1] as FakeElement;
+    const indicatorEmail = itemEmail.childNodes[0] as FakeElement;
+    const indicatorSms = itemSms.childNodes[0] as FakeElement;
+
+    expect(render.get(open)).toBe(true);
+    expect(trigger.attributes.get('aria-haspopup')).toBe('listbox');
+    expect(trigger.attributes.get('aria-expanded')).toBe('true');
+    expect(content.attributes.get('role')).toBe('listbox');
+    expect(content.style.left).toBe('64px');
+    expect(content.style.top).toBe('78px');
+    expect(itemEmail.attributes.get('aria-selected')).toBe('true');
+    expect(itemEmail.attributes.get('tabIndex')).toBe('0');
+    expect(isHidden(indicatorEmail)).toBe(false);
+    expect(isHidden(indicatorSms)).toBe(true);
+    expect(fakeDocument.activeElement).toBe(itemEmail);
+
+    itemSms.listeners.get('click')?.({ currentTarget: itemSms } as unknown as Event);
+    await Promise.resolve();
+
+    expect(selected).toEqual(['sms']);
+    expect(render.get(value)).toBe('sms');
+    expect(render.get(open)).toBe(false);
+    expect(fakeDocument.activeElement).toBe(trigger);
+    expect(isHidden(content)).toBe(true);
+
+    trigger.listeners.get('click')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+
+    const reopenedHost = fakeDocument.body.childNodes[0] as FakeElement;
+    const reopenedContent = reopenedHost.childNodes[1] as FakeElement;
+    const reopenedSms = reopenedContent.childNodes[1] as FakeElement;
+    const reopenedPush = reopenedContent.childNodes[2] as FakeElement;
+
+    expect(fakeDocument.activeElement).toBe(reopenedSms);
+
+    const preventDown = jest.fn();
+    reopenedSms.listeners.get('keydown')?.({
+      key: 'ArrowDown',
+      currentTarget: reopenedSms,
+      preventDefault: preventDown,
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(preventDown).toHaveBeenCalledTimes(1);
+    expect(render.get(value)).toBe('push');
+    expect(fakeDocument.activeElement).toBe(reopenedPush);
+
+    dismiss.listeners.get('click')?.({ currentTarget: dismiss } as unknown as Event);
+    await Promise.resolve();
+
+    expect(render.get(open)).toBe(false);
+    expect(fakeDocument.activeElement).toBe(trigger);
+    expect(isHidden(reopenedContent)).toBe(true);
+
+    render.dispose_reactive(mounted);
+    expect(fakeDocument.body.childNodes).toHaveLength(0);
+  });
+
+  test('headless combobox filters by query, selects items, and restores focus', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const open = render.signal(false);
+    const value = render.signal('email');
+    const query = render.signal('');
+    const selected: string[] = [];
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.combobox_root(open, value, query, () =>
+        render.element('section', null, [
+          render.combobox_input({ placeholder: 'Search channels' }, []),
+          render.combobox_portal([
+            render.combobox_content({ className: 'combobox', side: 'bottom', align: 'start', offset: 6 }, [
+              render.combobox_item('email', { onClick: () => selected.push('email') }, () => [
+                render.combobox_indicator(null, [render.text('o')]),
+                render.text('Email'),
+              ]),
+              render.combobox_item('sms', { onClick: () => selected.push('sms') }, () => [
+                render.combobox_indicator(null, [render.text('o')]),
+                render.text('SMS'),
+              ]),
+            ]),
+          ]),
+        ])
+      )
+    );
+
+    const section = container.childNodes[0] as FakeElement;
+    const input = section.childNodes[0] as FakeElement;
+    input.boundingRect = { left: 20, top: 40, right: 220, bottom: 76, width: 200, height: 36 };
+    input.focus();
+
+    input.listeners.get('input')?.({
+      currentTarget: input,
+      target: { value: 'sm' },
+    } as unknown as Event);
+    await Promise.resolve();
+
+    const host = fakeDocument.body.childNodes[0] as FakeElement;
+    const content = host.childNodes[1] as FakeElement;
+    const itemEmail = content.childNodes[0] as FakeElement;
+    const itemSms = content.childNodes[1] as FakeElement;
+
+    expect(render.get(open)).toBe(true);
+    expect(render.get(query)).toBe('sm');
+    expect(input.attributes.get('role')).toBe('combobox');
+    expect(input.attributes.get('aria-expanded')).toBe('true');
+    expect(content.attributes.get('role')).toBe('listbox');
+    expect(content.style.left).toBe('20px');
+    expect(content.style.top).toBe('82px');
+    expect(isHidden(itemEmail)).toBe(true);
+    expect(isHidden(itemSms)).toBe(false);
+
+    itemSms.listeners.get('click')?.({ currentTarget: itemSms } as unknown as Event);
+    await Promise.resolve();
+
+    expect(selected).toEqual(['sms']);
+    expect(render.get(value)).toBe('sms');
+    expect(render.get(query)).toBe('sms');
+    expect(render.get(open)).toBe(false);
+    expect(fakeDocument.activeElement).toBe(input);
+
+    input.listeners.get('click')?.({ currentTarget: input } as unknown as Event);
+    await Promise.resolve();
+
+    const reopenedHost = fakeDocument.body.childNodes[0] as FakeElement;
+    const reopenedContent = reopenedHost.childNodes[1] as FakeElement;
+    const reopenedSms = reopenedContent.childNodes[1] as FakeElement;
+    expect(isHidden(reopenedSms)).toBe(false);
+
+    input.listeners.get('keydown')?.({
+      key: 'ArrowDown',
+      currentTarget: input,
+      preventDefault: jest.fn(),
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(fakeDocument.activeElement).toBe(reopenedSms);
+
+    render.dispose_reactive(mounted);
+    expect(fakeDocument.body.childNodes).toHaveLength(0);
+  });
+
+  test('headless multiselect toggles multiple values and supports keyboard navigation', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const open = render.signal(false);
+    const values = render.signal<string[]>(['email']);
+    const selected: string[] = [];
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.multiselect_root(open, values, () =>
+        render.element('section', null, [
+          render.multiselect_trigger(null, [render.text('Choose channels')]),
+          render.multiselect_portal([
+            render.multiselect_content({ className: 'multiselect', side: 'bottom', align: 'start', offset: 8 }, [
+              render.multiselect_item('email', { onClick: () => selected.push('email') }, () => [
+                render.multiselect_indicator(null, [render.text('x')]),
+                render.text('Email'),
+              ]),
+              render.multiselect_item('sms', { onClick: () => selected.push('sms') }, () => [
+                render.multiselect_indicator(null, [render.text('x')]),
+                render.text('SMS'),
+              ]),
+              render.multiselect_item('push', { onClick: () => selected.push('push') }, () => [
+                render.multiselect_indicator(null, [render.text('x')]),
+                render.text('Push'),
+              ]),
+            ]),
+          ]),
+        ])
+      )
+    );
+
+    const section = container.childNodes[0] as FakeElement;
+    const trigger = section.childNodes[0] as FakeElement;
+    trigger.boundingRect = { left: 48, top: 16, right: 168, bottom: 52, width: 120, height: 36 };
+
+    trigger.listeners.get('click')?.({ currentTarget: trigger } as unknown as Event);
+    await Promise.resolve();
+
+    const host = fakeDocument.body.childNodes[0] as FakeElement;
+    const content = host.childNodes[1] as FakeElement;
+    const itemEmail = content.childNodes[0] as FakeElement;
+    const itemSms = content.childNodes[1] as FakeElement;
+    const itemPush = content.childNodes[2] as FakeElement;
+    const indicatorEmail = itemEmail.childNodes[0] as FakeElement;
+    const indicatorSms = itemSms.childNodes[0] as FakeElement;
+
+    expect(render.get(open)).toBe(true);
+    expect(content.attributes.get('aria-multiselectable')).toBe('true');
+    expect(isHidden(indicatorEmail)).toBe(false);
+    expect(isHidden(indicatorSms)).toBe(true);
+    expect(fakeDocument.activeElement).toBe(itemEmail);
+
+    itemSms.listeners.get('click')?.({ currentTarget: itemSms } as unknown as Event);
+    await Promise.resolve();
+
+    expect(selected).toEqual(['sms']);
+    expect(render.get(values)).toEqual(['email', 'sms']);
+    expect(render.get(open)).toBe(true);
+    expect(isHidden(indicatorSms)).toBe(false);
+
+    const preventDown = jest.fn();
+    itemSms.listeners.get('keydown')?.({
+      key: 'ArrowDown',
+      currentTarget: itemSms,
+      preventDefault: preventDown,
+    } as unknown as Event);
+    await Promise.resolve();
+    expect(preventDown).toHaveBeenCalledTimes(1);
+    expect(fakeDocument.activeElement).toBe(itemPush);
+
+    itemPush.listeners.get('keydown')?.({
+      key: 'Enter',
+      currentTarget: itemPush,
+      preventDefault: jest.fn(),
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(render.get(values)).toEqual(['email', 'sms', 'push']);
+    expect(render.get(open)).toBe(true);
+
+    itemPush.listeners.get('keydown')?.({
+      key: 'Escape',
+      currentTarget: itemPush,
+      preventDefault: jest.fn(),
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(render.get(open)).toBe(false);
+    expect(fakeDocument.activeElement).toBe(trigger);
+
+    render.dispose_reactive(mounted);
+    expect(fakeDocument.body.childNodes).toHaveLength(0);
+  });
+
+  test('headless checkbox toggles signal state and indicator visibility', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const checked = render.signal(false);
+    const externalClick = jest.fn();
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.checkbox_root(checked, { onClick: externalClick }, () => [
+        render.checkbox_indicator(null, [render.text('check')]),
+        render.text('Accept'),
+      ])
+    );
+
+    const root = container.childNodes[0] as FakeElement;
+    const indicator = root.childNodes[0] as FakeElement;
+
+    expect(root.attributes.get('role')).toBe('checkbox');
+    expect(root.attributes.get('aria-checked')).toBe('false');
+    expect(root.attributes.get('data-state')).toBe('unchecked');
+    expect(isHidden(indicator)).toBe(true);
+
+    root.listeners.get('click')?.({ currentTarget: root } as unknown as Event);
+    await Promise.resolve();
+
+    expect(externalClick).toHaveBeenCalledTimes(1);
+    expect(render.get(checked)).toBe(true);
+    expect(root.attributes.get('aria-checked')).toBe('true');
+    expect(root.attributes.get('data-state')).toBe('checked');
+    expect(isHidden(indicator)).toBe(false);
+
+    const preventDefault = jest.fn();
+    root.listeners.get('keydown')?.({
+      key: 'Enter',
+      currentTarget: root,
+      preventDefault,
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(render.get(checked)).toBe(false);
+    expect(root.attributes.get('aria-checked')).toBe('false');
+    expect(isHidden(indicator)).toBe(true);
+
+    render.dispose_reactive(mounted);
+  });
+
+  test('headless radio group supports click selection, keyboard navigation, and indicators', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    const value = render.signal('email');
+    const selected: string[] = [];
+    const isHidden = (node: FakeElement): boolean =>
+      node.attributes.get('hidden') === 'true' || (node as FakeElement & { hidden?: boolean }).hidden === true;
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.radio_group(value, null, () => [
+        render.radio_item('email', { onClick: () => selected.push('email') }, () => [
+          render.radio_indicator(null, [render.text('o')]),
+          render.text('Email'),
+        ]),
+        render.radio_item('sms', { onClick: () => selected.push('sms') }, () => [
+          render.radio_indicator(null, [render.text('o')]),
+          render.text('SMS'),
+        ]),
+        render.radio_item('push', { onClick: () => selected.push('push') }, () => [
+          render.radio_indicator(null, [render.text('o')]),
+          render.text('Push'),
+        ]),
+      ])
+    );
+
+    const group = container.childNodes[0] as FakeElement;
+    const itemEmail = group.childNodes[0] as FakeElement;
+    const itemSms = group.childNodes[1] as FakeElement;
+    const itemPush = group.childNodes[2] as FakeElement;
+    const indicatorEmail = itemEmail.childNodes[0] as FakeElement;
+    const indicatorSms = itemSms.childNodes[0] as FakeElement;
+
+    expect(group.attributes.get('role')).toBe('radiogroup');
+    expect(itemEmail.attributes.get('aria-checked')).toBe('true');
+    expect(itemEmail.attributes.get('tabIndex')).toBe('0');
+    expect(itemSms.attributes.get('aria-checked')).toBe('false');
+    expect(itemSms.attributes.get('tabIndex')).toBe('-1');
+    expect(isHidden(indicatorEmail)).toBe(false);
+    expect(isHidden(indicatorSms)).toBe(true);
+
+    itemSms.listeners.get('click')?.({ currentTarget: itemSms } as unknown as Event);
+    await Promise.resolve();
+
+    expect(selected).toEqual(['sms']);
+    expect(render.get(value)).toBe('sms');
+    expect(itemSms.attributes.get('aria-checked')).toBe('true');
+    expect(itemSms.attributes.get('tabIndex')).toBe('0');
+    expect(isHidden(indicatorSms)).toBe(false);
+    expect(isHidden(indicatorEmail)).toBe(true);
+
+    const preventDefault = jest.fn();
+    itemSms.listeners.get('keydown')?.({
+      key: 'ArrowDown',
+      currentTarget: itemSms,
+      preventDefault,
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(render.get(value)).toBe('push');
+    expect(fakeDocument.activeElement).toBe(itemPush);
+    expect(itemPush.attributes.get('aria-checked')).toBe('true');
+
+    const preventHome = jest.fn();
+    itemPush.listeners.get('keydown')?.({
+      key: 'Home',
+      currentTarget: itemPush,
+      preventDefault: preventHome,
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(preventHome).toHaveBeenCalledTimes(1);
+    expect(render.get(value)).toBe('email');
+    expect(fakeDocument.activeElement).toBe(itemEmail);
+
+    render.dispose_reactive(mounted);
+  });
+
   test('tabs helpers throw when used outside a tabs root provider', () => {
     const fakeDocument = new FakeDocument();
     const renderer = render.create_dom_renderer({ document: fakeDocument as never });
@@ -1003,6 +1604,32 @@ describe('render DOM renderer', () => {
     expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
   });
 
+  test('tooltip helpers throw when used outside a tooltip root provider', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.tooltip_trigger(null, [render.text('Hover target')])
+    );
+
+    expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
+  test('toast helpers throw when used outside a toast root provider', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.toast_content(null, [render.text('Saved')])
+    );
+
+    expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
   test('menu helpers throw when used outside a menu root provider', () => {
     const fakeDocument = new FakeDocument();
     const renderer = render.create_dom_renderer({ document: fakeDocument as never });
@@ -1014,6 +1641,64 @@ describe('render DOM renderer', () => {
 
     expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
     expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
+  test('select helpers throw when used outside a select root provider', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.select_indicator(null, [render.text('o')])
+    );
+
+    expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
+  test('combobox helpers throw when used outside a combobox root provider', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.combobox_indicator(null, [render.text('o')])
+    );
+
+    expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
+  test('multiselect helpers throw when used outside a multiselect root provider', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.multiselect_indicator(null, [render.text('x')])
+    );
+
+    expect((mounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((mounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+  });
+
+  test('checkbox/radio helpers throw when used outside their providers', () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const checkboxContainer = fakeDocument.createElement('div');
+    const radioContainer = fakeDocument.createElement('div');
+
+    const checkboxMounted = render.mount_reactive(renderer, checkboxContainer, () =>
+      render.checkbox_indicator(null, [render.text('check')])
+    );
+    const radioMounted = render.mount_reactive(renderer, radioContainer, () =>
+      render.radio_indicator(null, [render.text('dot')])
+    );
+
+    expect((checkboxMounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((checkboxMounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
+    expect((radioMounted as { $tag?: string; $payload?: unknown }).$tag).toBe('Err');
+    expect(String((radioMounted as { $payload?: unknown }).$payload)).toContain('No provider found for context');
   });
 
   test('render.state throws outside a component frame', () => {

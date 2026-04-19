@@ -1,0 +1,9 @@
+import { render } from "@std";
+
+pub fn root(checked: Signal<bool>, props: any, renderChildren: fn() -> any) -> VNode {
+  render.checkboxRoot(checked, props, renderChildren)
+}
+
+pub fn indicator(props: any, children: any) -> VNode {
+  render.checkboxIndicator(props, children)
+}

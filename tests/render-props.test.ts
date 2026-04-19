@@ -7,6 +7,9 @@ describe('render prop helpers', () => {
     expect(render.props_id('foo')).toEqual({ id: 'foo' });
     expect(render.props_style('color:red')).toEqual({ style: 'color:red' });
     expect(render.props_value('hello')).toEqual({ value: 'hello' });
+    expect(render.props_checked(true)).toEqual({ checked: true });
+    expect(render.props_type('checkbox')).toEqual({ type: 'checkbox' });
+    expect(render.props_name('contact')).toEqual({ name: 'contact' });
     expect(render.props_placeholder('Enter...')).toEqual({ placeholder: 'Enter...' });
     expect(render.props_href('/home')).toEqual({ href: '/home' });
     expect(render.props_disabled(true)).toEqual({ disabled: true });
@@ -24,6 +27,21 @@ describe('render prop helpers', () => {
 
     expect(onInput).toHaveBeenCalledWith('typed text');
     expect(onChange).toHaveBeenCalledWith('changed text');
+  });
+
+  test('checked-change and submit handlers normalize DOM events', () => {
+    const onChecked = jest.fn();
+    const onSubmit = jest.fn();
+    const preventDefault = jest.fn();
+    const checkedProps = render.props_on_checked_change(onChecked) as { onChange?: (event: Event) => void };
+    const submitProps = render.props_on_submit(onSubmit) as { onSubmit?: (event: Event) => void };
+
+    checkedProps.onChange?.({ target: { checked: true } } as unknown as Event);
+    submitProps.onSubmit?.({ preventDefault } as unknown as Event);
+
+    expect(onChecked).toHaveBeenCalledWith(true);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   test('props_merge composes new helpers with existing props', () => {
@@ -92,6 +110,11 @@ describe('render prop helpers', () => {
         children,
         composeHandlers,
         createContext,
+        props_checked,
+        props_name,
+        props_on_checked_change,
+        props_on_submit,
+        props_type,
         slot,
         text,
         useContext,
@@ -102,6 +125,15 @@ describe('render prop helpers', () => {
         let theme = createContext("light");
         let _click = composeHandlers(0, 0);
         let _items = children(text("item"));
+        let _checked = props_checked(true);
+        let _type = props_type("checkbox");
+        let _name = props_name("contact");
+        let _toggle = props_on_checked_change(fn(next: bool) -> void {
+          let _ = next;
+        });
+        let _submit = props_on_submit(fn() -> void {
+          let _ = 0;
+        });
         let _wrapped = withContext(theme, "dark", slot(text(useContext(theme)), 0));
         text("done")
       }
@@ -112,6 +144,11 @@ describe('render prop helpers', () => {
     expect(js).toContain('createContext("light")');
     expect(js).toContain('withContext(theme, "dark"');
     expect(js).toContain('useContext(theme)');
+    expect(js).toContain('props_checked(true)');
+    expect(js).toContain('props_type("checkbox")');
+    expect(js).toContain('props_name("contact")');
+    expect(js).toContain('props_on_checked_change');
+    expect(js).toContain('props_on_submit');
     expect(js).toContain('composeHandlers');
     expect(js).toContain('children(text("item"))');
     expect(js).toContain('slot(text(useContext(theme)), 0)');

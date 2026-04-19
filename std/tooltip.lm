@@ -1,0 +1,17 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.tooltipRoot(open, renderChildren)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.tooltipPortal(children)
+}
+
+pub fn trigger(props: any, children: any) -> VNode {
+  render.tooltipTrigger(props, children)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.tooltipContent(props, children)
+}
