@@ -86,7 +86,7 @@ Last updated for v0.5.7.
 | HKT stdlib traits | Stable | `@std/functor`, `@std/applicative`, `@std/monad` + Option/Result/Vec/HashMap helpers |
 | Collection iteration + query helpers | Stable | `@std/iter` adds `filter/zip/enumerate/flatten/chunk/window/group_by/...`; `@std/query` adds eager `Query<T>` pipelines (`where_q`, `select_q`, `order_by_q`, `limit_q`, `join_q`) that compose with `|>` |
 | Frontend/reactivity primitives | Stable | `@std/reactive` + `@std/render` (`Signal`, `Memo`, `Effect`, `VNode`, renderer contract + DOM/SSR/Canvas/Terminal renderers) plus DOM-oriented prop helpers (`class/id/style/value/placeholder/href/disabled`, click/input/change handlers, prop merge/key), portals, and hardening coverage for idempotent cleanup, stress batching, parity, and renderer error paths |
-| UI framework authoring model | Beta | Component frames, stable local state, keyed DOM reconciliation, context/slots, prop composition, typed store helpers (`@std/store`), controlled-form helpers (`@std/forms`), and headless DOM primitives (`@std/tabs`, `@std/dialog`, `@std/popover`, `@std/tooltip`, `@std/toast`, `@std/menu`, `@std/select`, `@std/combobox`, `@std/multiselect`, `@std/checkbox`, `@std/radio`) are implemented on the JS/DOM path; the remaining work is deeper form/data controls, async ergonomics, and broader cross-backend polish. See [UI_FRAMEWORK.md](UI_FRAMEWORK.md) |
+| UI framework authoring model | Beta | Component frames, stable local state, keyed DOM reconciliation, context/slots, prop composition, typed store helpers (`@std/store`), controlled-form helpers (`@std/forms`), cached async resource helpers (`@std/resource`), render-level suspense/error boundaries, and headless DOM primitives (`@std/tabs`, `@std/dialog`, `@std/popover`, `@std/tooltip`, `@std/toast`, `@std/menu`, `@std/select`, `@std/combobox`, `@std/multiselect`, `@std/checkbox`, `@std/radio`) are implemented on the JS/DOM path; the remaining work is deeper app/data ergonomics and broader cross-backend polish. See [UI_FRAMEWORK.md](UI_FRAMEWORK.md) |
 | Runtime Option/Result | Stable | JS runtime + helpers |
 | Async I/O | Stable | `io.readLineAsync()` |
 | File system | Stable | `fs.readFile`, `fs.writeFile`, `fs.readDir`, `fs.metadata`, `fs.exists`, `fs.mkdir`, `fs.removeFile` |
@@ -142,6 +142,6 @@ Last updated for v0.5.7.
 3. **GPU CI coverage** (dedicated GPU-capable runner for `LUMINA_WEBGPU_SMOKE=1` specs)
 4. **Registry ecosystem/discovery depth** (search ranking/pagination, package quality metadata, adoption workflows)
 5. **Cross-file refactor depth + registry polish** (broader semantic-aware LSP transforms, package metadata quality, and higher-order workflow refinements)
-6. **UI framework expansion** (richer form/data controls, async/state ergonomics, and broader backend/docs polish on top of the current component-frame + headless-DOM foundation)
+6. **UI framework expansion** (deeper async/app ergonomics, richer data controls, and broader backend/docs polish on top of the current component-frame + headless-DOM foundation)
 
 Reference: [WEB_NATIVE_ROADMAP.md](WEB_NATIVE_ROADMAP.md)

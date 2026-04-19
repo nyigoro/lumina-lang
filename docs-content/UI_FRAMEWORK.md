@@ -26,6 +26,8 @@ Today the repo includes:
 - portal support for layered DOM UI
 - typed shared-state helpers in `@std/store`
 - controlled form helpers and lightweight validation utilities in `@std/forms`
+- cached async resource helpers in `@std/resource`
+- suspense and error-boundary render helpers
 - headless DOM primitives in `@std/tabs`, `@std/dialog`, `@std/popover`, `@std/tooltip`, `@std/toast`, `@std/menu`, `@std/select`, `@std/combobox`, `@std/multiselect`, `@std/checkbox`, and `@std/radio`
 
 That foundation is now strong enough to support real headless UI authoring, but the broader app/framework layer is still intentionally incomplete.

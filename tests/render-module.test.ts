@@ -105,6 +105,10 @@ describe('@std/render module', () => {
     const source = `
       import { render } from "@std";
 
+      async fn loadChannel() -> string {
+        "email"
+      }
+
       fn build(active: Signal<string>, open: Signal<bool>) -> VNode {
         let _context = render.create_required_context();
         let _children = render.children([render.text("child")]);
@@ -118,6 +122,18 @@ describe('@std/render module', () => {
         let _submit = render.props_on_submit(fn() -> void {
           let _ = 0;
         });
+        let resource = render.createResource("channel", || loadChannel(), 0);
+        let _status = render.resourceStatus(resource);
+        let _data = render.resourceData(resource);
+        let _error = render.resourceError(resource);
+        let _refresh = render.resourceRefresh(resource);
+        render.resourceInvalidate(resource);
+        let _value = render.resourceMutate(resource, "sms");
+        let asyncUi = render.suspense(render.text("Loading"), || [
+          render.errorBoundary(render.text("Error"), || [
+            render.text(render.resourceRead(resource))
+          ])
+        ]);
 
         let tabs = render.tabsRoot(active, || [
           render.tabsList(render.props_class("tabs"), || [
@@ -224,7 +240,7 @@ describe('@std/render module', () => {
           ])
         ]);
 
-        render.portalBody([tabs, dialog, popover, tooltip, toast, menu, selectUi, comboboxUi, multiselectUi, checkbox, radio])
+        render.portalBody([asyncUi, tabs, dialog, popover, tooltip, toast, menu, selectUi, comboboxUi, multiselectUi, checkbox, radio])
       }
     `.trim() + '\n';
 

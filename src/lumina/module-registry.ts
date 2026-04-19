@@ -4711,6 +4711,18 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const stateType: Type = fnType([stateValueT], adt('Signal', [stateValueT]));
     const rememberValueT = freshTypeVar();
     const rememberType: Type = fnType([fnType([], rememberValueT)], rememberValueT);
+    const resourceHandleType = primitive('any');
+    const resourceCreateType: Type = fnType([
+      primitive('any'),
+      fnType([], promiseType(primitive('any'))),
+      primitive('any')
+    ], resourceHandleType);
+    const resourceStatusType: Type = fnType([resourceHandleType], primitive('string'));
+    const resourceValueType: Type = fnType([resourceHandleType], primitive('any'));
+    const resourceRefreshType: Type = fnType([resourceHandleType], promiseType(primitive('any')));
+    const resourceInvalidateType: Type = fnType([resourceHandleType], primitive('void'));
+    const suspenseType: Type = fnType([primitive('any'), fnType([], primitive('any'))], vnodeT);
+    const errorBoundaryType: Type = fnType([primitive('any'), fnType([], primitive('any'))], vnodeT);
     const childrenResolveType: Type = fnType([primitive('any')], primitive('any'));
     const slotType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const slotOrType: Type = fnType([primitive('any'), primitive('any'), primitive('any')], vnodeT);
@@ -5308,6 +5320,116 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'any',
             schemeFromVars(rememberType, [rememberValueT]),
             ['compute'],
+            'std://render'
+          ),
+        ],
+        [
+          'createResource',
+          moduleFunctionWithScheme(
+            'createResource',
+            ['any', 'fn() -> Promise<any>', 'any'],
+            'any',
+            schemeFromVars(resourceCreateType, []),
+            ['key', 'loader', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceStatus',
+          moduleFunctionWithScheme(
+            'resourceStatus',
+            ['any'],
+            'string',
+            schemeFromVars(resourceStatusType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceData',
+          moduleFunctionWithScheme(
+            'resourceData',
+            ['any'],
+            'any',
+            schemeFromVars(resourceValueType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceError',
+          moduleFunctionWithScheme(
+            'resourceError',
+            ['any'],
+            'any',
+            schemeFromVars(resourceValueType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceRead',
+          moduleFunctionWithScheme(
+            'resourceRead',
+            ['any'],
+            'any',
+            schemeFromVars(resourceValueType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceRefresh',
+          moduleFunctionWithScheme(
+            'resourceRefresh',
+            ['any'],
+            'Promise<any>',
+            schemeFromVars(resourceRefreshType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceInvalidate',
+          moduleFunctionWithScheme(
+            'resourceInvalidate',
+            ['any'],
+            'void',
+            schemeFromVars(resourceInvalidateType, []),
+            ['resource'],
+            'std://render'
+          ),
+        ],
+        [
+          'resourceMutate',
+          moduleFunctionWithScheme(
+            'resourceMutate',
+            ['any', 'any'],
+            'any',
+            schemeFromVars(fnType([resourceHandleType, primitive('any')], primitive('any')), []),
+            ['resource', 'value'],
+            'std://render'
+          ),
+        ],
+        [
+          'suspense',
+          moduleFunctionWithScheme(
+            'suspense',
+            ['any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(suspenseType, []),
+            ['fallback', 'renderChildren'],
+            'std://render'
+          ),
+        ],
+        [
+          'errorBoundary',
+          moduleFunctionWithScheme(
+            'errorBoundary',
+            ['any', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(errorBoundaryType, []),
+            ['fallback', 'renderChildren'],
             'std://render'
           ),
         ],

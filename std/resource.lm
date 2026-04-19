@@ -1,0 +1,41 @@
+import { render } from "@std";
+
+pub struct Resource<T> {
+  raw: any
+}
+
+pub fn createResource<T>(key: any, loader: fn() -> Promise<T>) -> Resource<T> {
+  Resource<T> { raw: render.createResource(key, fn() -> Promise<any> { loader() }, render.props_empty()) }
+}
+
+pub fn createResourceWithOptions<T>(key: any, loader: fn() -> Promise<T>, options: any) -> Resource<T> {
+  Resource<T> { raw: render.createResource(key, fn() -> Promise<any> { loader() }, options) }
+}
+
+pub fn status<T>(resource: Resource<T>) -> string {
+  render.resourceStatus(resource.raw)
+}
+
+pub fn data<T>(resource: Resource<T>) -> any {
+  render.resourceData(resource.raw)
+}
+
+pub fn error<T>(resource: Resource<T>) -> any {
+  render.resourceError(resource.raw)
+}
+
+pub fn read<T>(resource: Resource<T>) -> T {
+  render.resourceRead(resource.raw)
+}
+
+pub fn refresh<T>(resource: Resource<T>) -> Promise<T> {
+  render.resourceRefresh(resource.raw)
+}
+
+pub fn invalidate<T>(resource: Resource<T>) -> void {
+  render.resourceInvalidate(resource.raw)
+}
+
+pub fn mutate<T>(resource: Resource<T>, value: T) -> T {
+  render.resourceMutate(resource.raw, value)
+}

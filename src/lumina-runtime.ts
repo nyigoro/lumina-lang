@@ -5957,6 +5957,162 @@ export class Effect {
   }
 }
 
+type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
+
+interface ResourceOptions {
+  ttlMs: number;
+  enabled: boolean;
+}
+
+interface ResourceRecord<T = unknown> {
+  key: string;
+  loader: () => Promise<T> | T;
+  ttlMs: number;
+  enabled: boolean;
+  data: Signal<unknown>;
+  hasData: Signal<boolean>;
+  error: Signal<unknown>;
+  status: Signal<ResourceStatus>;
+  promise: Promise<T> | null;
+  expiresAt: number;
+}
+
+export class ResourceHandle<T = unknown> {
+  constructor(readonly record: ResourceRecord<T>) {}
+}
+
+const resourceCache = new Map<string, ResourceRecord<unknown>>();
+
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  !!value
+  && (typeof value === 'object' || typeof value === 'function')
+  && typeof (value as { then?: unknown }).then === 'function';
+
+const normalizeResourceKey = (key: unknown): string => {
+  if (typeof key === 'string') return key;
+  if (typeof key === 'number' || typeof key === 'boolean' || typeof key === 'bigint') {
+    return String(key);
+  }
+  if (key === null) return 'null';
+  if (key === undefined) return 'undefined';
+  try {
+    return toJsonString(key, false);
+  } catch {
+    return String(key);
+  }
+};
+
+const normalizeResourceOptions = (options: unknown): ResourceOptions => {
+  const candidate = options && typeof options === 'object' ? (options as Record<string, unknown>) : {};
+  const ttlRaw = candidate.ttlMs;
+  const ttlMs = typeof ttlRaw === 'number' && Number.isFinite(ttlRaw) && ttlRaw > 0 ? ttlRaw : 0;
+  const enabled = candidate.enabled !== false;
+  return { ttlMs, enabled };
+};
+
+const resourceHasData = (record: ResourceRecord<unknown>): boolean => !!record.hasData.peek();
+
+const createResourceRecord = <T>(
+  key: string,
+  loader: () => Promise<T> | T,
+  options: ResourceOptions
+): ResourceRecord<T> => ({
+  key,
+  loader,
+  ttlMs: options.ttlMs,
+  enabled: options.enabled,
+  data: new Signal<unknown>(null),
+  hasData: new Signal<boolean>(false),
+  error: new Signal<unknown>(null),
+  status: new Signal<ResourceStatus>('idle'),
+  promise: null,
+  expiresAt: 0,
+});
+
+const startResourceLoad = <T>(record: ResourceRecord<T>, force: boolean = false): Promise<T> => {
+  if (record.promise) return record.promise;
+  if (!record.enabled && !force) {
+    return Promise.reject(new Error(`Resource '${record.key}' is disabled`));
+  }
+  record.status.set('loading');
+  record.error.set(null);
+
+  let loadResult: Promise<T>;
+  try {
+    loadResult = Promise.resolve(record.loader());
+  } catch (error) {
+    loadResult = Promise.reject(error);
+  }
+
+  const promise = loadResult.then(
+    (value) => {
+      record.data.set(value as unknown);
+      record.hasData.set(true);
+      record.error.set(null);
+      record.status.set('success');
+      record.expiresAt = record.ttlMs > 0 ? Date.now() + record.ttlMs : Number.POSITIVE_INFINITY;
+      record.promise = null;
+      return value;
+    },
+    (error) => {
+      record.error.set(error);
+      record.status.set('error');
+      record.expiresAt = 0;
+      record.promise = null;
+      throw error;
+    }
+  );
+
+  promise.catch(() => undefined);
+  record.promise = promise;
+  return promise;
+};
+
+const ensureResourceCurrent = <T>(record: ResourceRecord<T>): void => {
+  if (record.promise) return;
+  if (!record.enabled) return;
+
+  if (!resourceHasData(record)) {
+    if (record.status.peek() === 'idle') {
+      startResourceLoad(record);
+    }
+    return;
+  }
+
+  if (record.ttlMs > 0 && Date.now() >= record.expiresAt) {
+    startResourceLoad(record);
+  }
+};
+
+const resolveResourceRecord = <T>(
+  key: unknown,
+  loader: () => Promise<T> | T,
+  options: unknown
+): ResourceRecord<T> => {
+  const normalizedKey = normalizeResourceKey(key);
+  const normalizedOptions = normalizeResourceOptions(options);
+  const existing = resourceCache.get(normalizedKey) as ResourceRecord<T> | undefined;
+  if (existing) {
+    existing.loader = loader;
+    existing.ttlMs = normalizedOptions.ttlMs;
+    existing.enabled = normalizedOptions.enabled;
+    ensureResourceCurrent(existing);
+    return existing;
+  }
+
+  const record = createResourceRecord(normalizedKey, loader, normalizedOptions);
+  resourceCache.set(normalizedKey, record as ResourceRecord<unknown>);
+  ensureResourceCurrent(record);
+  return record;
+};
+
+const asResourceHandle = <T>(candidate: unknown, apiName: string): ResourceHandle<T> => {
+  if (candidate instanceof ResourceHandle) {
+    return candidate as ResourceHandle<T>;
+  }
+  throw new Error(`${apiName} expects a resource handle`);
+};
+
 export interface VNode {
   kind: 'text' | 'element' | 'fragment' | 'portal';
   tag?: string;
@@ -8232,6 +8388,102 @@ export const render = {
     const frameManager = requireActiveFrameManager('render.remember');
     return frameManager.getSlot('memo', compute);
   },
+  resource_create: <T>(
+    key: unknown,
+    loader: (() => Promise<T>) | (() => T),
+    options?: unknown
+  ): ResourceHandle<T> => new ResourceHandle<T>(resolveResourceRecord(key, loader, options)),
+  resource_status: (resource: unknown): string => {
+    const handle = asResourceHandle(resource, 'render.resource_status');
+    ensureResourceCurrent(handle.record);
+    return handle.record.status.get();
+  },
+  resource_data: (resource: unknown): unknown => {
+    const handle = asResourceHandle(resource, 'render.resource_data');
+    ensureResourceCurrent(handle.record);
+    return handle.record.hasData.get() ? handle.record.data.get() : null;
+  },
+  resource_error: (resource: unknown): unknown => {
+    const handle = asResourceHandle(resource, 'render.resource_error');
+    ensureResourceCurrent(handle.record);
+    return handle.record.error.get();
+  },
+  resource_read: <T>(resource: unknown): T => {
+    const handle = asResourceHandle<T>(resource, 'render.resource_read');
+    ensureResourceCurrent(handle.record);
+    const status = handle.record.status.get();
+    if (handle.record.hasData.get()) {
+      return handle.record.data.get() as T;
+    }
+    if (status === 'loading' && handle.record.promise) {
+      throw handle.record.promise;
+    }
+    const error = handle.record.error.get();
+    if (error !== null) {
+      throw error;
+    }
+    throw new Error(`Resource '${handle.record.key}' has no data`);
+  },
+  resource_refresh: <T>(resource: unknown): Promise<T> => {
+    const handle = asResourceHandle<T>(resource, 'render.resource_refresh');
+    handle.record.expiresAt = 0;
+    return startResourceLoad(handle.record, true);
+  },
+  resource_invalidate: (resource: unknown): void => {
+    const handle = asResourceHandle(resource, 'render.resource_invalidate');
+    handle.record.expiresAt = 0;
+    handle.record.status.set('idle');
+    ensureResourceCurrent(handle.record);
+  },
+  resource_mutate: <T>(resource: unknown, value: T): T => {
+    const handle = asResourceHandle<T>(resource, 'render.resource_mutate');
+    handle.record.data.set(value as unknown);
+    handle.record.hasData.set(true);
+    handle.record.error.set(null);
+    handle.record.status.set('success');
+    handle.record.expiresAt = handle.record.ttlMs > 0 ? Date.now() + handle.record.ttlMs : Number.POSITIVE_INFINITY;
+    return handle.record.data.get() as T;
+  },
+  suspense: (fallback: unknown, renderChildren: () => ComponentRenderable): VNode => {
+    try {
+      return coerceRenderableToVNode(renderChildren());
+    } catch (error) {
+      if (!isThenable(error)) {
+        throw error;
+      }
+      const resolvedFallback = typeof fallback === 'function'
+        ? (fallback as () => ComponentRenderable)()
+        : (fallback as VNodeInput);
+      return coerceRenderableToVNode(resolvedFallback);
+    }
+  },
+  error_boundary: (fallback: unknown, renderChildren: () => ComponentRenderable): VNode => {
+    try {
+      return coerceRenderableToVNode(renderChildren());
+    } catch (error) {
+      if (isThenable(error)) {
+        throw error;
+      }
+      const resolvedFallback = typeof fallback === 'function'
+        ? (fallback as (value: unknown) => ComponentRenderable)(error)
+        : (fallback as VNodeInput);
+      return coerceRenderableToVNode(resolvedFallback);
+    }
+  },
+  createResource: <T>(
+    key: unknown,
+    loader: (() => Promise<T>) | (() => T),
+    options?: unknown
+  ): ResourceHandle<T> => render.resource_create(key, loader, options),
+  resourceStatus: (resource: unknown): string => render.resource_status(resource),
+  resourceData: (resource: unknown): unknown => render.resource_data(resource),
+  resourceError: (resource: unknown): unknown => render.resource_error(resource),
+  resourceRead: <T>(resource: unknown): T => render.resource_read<T>(resource),
+  resourceRefresh: <T>(resource: unknown): Promise<T> => render.resource_refresh<T>(resource),
+  resourceInvalidate: (resource: unknown): void => render.resource_invalidate(resource),
+  resourceMutate: <T>(resource: unknown, value: T): T => render.resource_mutate(resource, value),
+  errorBoundary: (fallback: unknown, renderChildren: () => ComponentRenderable): VNode =>
+    render.error_boundary(fallback, renderChildren),
   children: (input: unknown): VNode[] => normalizeVNodeChildren(resolveChildrenInput(input)),
   slot: <P>(
     slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
@@ -10214,6 +10466,22 @@ export const withContext = <T>(context: ContextToken<T>, value: T, renderChildre
 export const useContext = <T>(context: ContextToken<T>): T => render.use_context(context);
 export const state = <T>(initial: T): Signal<T> => render.state(initial);
 export const remember = <T>(compute: () => T): T => render.remember(compute);
+export const createResource = <T>(
+  key: unknown,
+  loader: (() => Promise<T>) | (() => T),
+  options?: unknown
+): ResourceHandle<T> => render.resource_create(key, loader, options);
+export const resourceStatus = (resource: unknown): string => render.resource_status(resource);
+export const resourceData = (resource: unknown): unknown => render.resource_data(resource);
+export const resourceError = (resource: unknown): unknown => render.resource_error(resource);
+export const resourceRead = <T>(resource: unknown): T => render.resource_read<T>(resource);
+export const resourceRefresh = <T>(resource: unknown): Promise<T> => render.resource_refresh<T>(resource);
+export const resourceInvalidate = (resource: unknown): void => render.resource_invalidate(resource);
+export const resourceMutate = <T>(resource: unknown, value: T): T => render.resource_mutate(resource, value);
+export const suspense = (fallback: unknown, renderChildren: () => ComponentRenderable): VNode =>
+  render.suspense(fallback, renderChildren);
+export const errorBoundary = (fallback: unknown, renderChildren: () => ComponentRenderable): VNode =>
+  render.error_boundary(fallback, renderChildren);
 export const children = (input: unknown): VNode[] => render.children(input);
 export const slot = <P>(
   slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,

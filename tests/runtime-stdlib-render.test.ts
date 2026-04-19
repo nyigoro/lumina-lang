@@ -167,4 +167,77 @@ describe('runtime render module', () => {
     expect(fallback.kind).toBe('text');
     expect(fallback.text).toBe('fallback');
   });
+
+  test('resource helpers deduplicate loads and revalidate stale data', async () => {
+    const key = `resource:${Date.now()}:dedupe`;
+    let calls = 0;
+    let resolveFirst!: (value: string) => void;
+
+    const loader = jest.fn(() => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<string>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve('second');
+    });
+
+    const first = render.createResource(key, loader, { ttlMs: 5 });
+    const second = render.createResource(key, loader, { ttlMs: 5 });
+
+    expect(calls).toBe(1);
+    expect(render.resourceStatus(first)).toBe('loading');
+    let pending: unknown = null;
+    try {
+      render.resourceRead(first);
+    } catch (error) {
+      pending = error;
+    }
+    expect(pending).toBeInstanceOf(Promise);
+
+    resolveFirst('first');
+    await (pending as Promise<unknown>);
+    await Promise.resolve();
+
+    expect(render.resourceStatus(second)).toBe('success');
+    expect(render.resourceData(first)).toBe('first');
+    expect(render.resourceRead(second)).toBe('first');
+
+    const nowSpy = jest.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(100);
+    const stale = render.createResource(key, loader, { ttlMs: 5 });
+    nowSpy.mockReturnValue(200);
+    render.resourceInvalidate(stale);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls).toBe(2);
+    expect(render.resourceData(stale)).toBe('second');
+    expect(render.resourceStatus(stale)).toBe('success');
+    nowSpy.mockRestore();
+  });
+
+  test('suspense and error boundary helpers catch the right thrown values', () => {
+    const suspenseFallback = render.suspense(render.text('Loading'), () => {
+      throw Promise.resolve('pending');
+    });
+    expect(suspenseFallback.kind).toBe('text');
+    expect(suspenseFallback.text).toBe('Loading');
+
+    const errorFallback = render.error_boundary(
+      (error: unknown) => render.text(`Error: ${String((error as Error)?.message ?? error)}`),
+      () => {
+        throw new Error('Boom');
+      }
+    );
+    expect(errorFallback.kind).toBe('text');
+    expect(errorFallback.text).toBe('Error: Boom');
+
+    expect(() =>
+      render.error_boundary(render.text('nope'), () => {
+        throw Promise.resolve('pending');
+      })
+    ).toThrow();
+  });
 });

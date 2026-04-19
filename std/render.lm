@@ -44,6 +44,46 @@ pub fn remember<T>(compute: fn() -> T) -> T {
   render.remember(compute)
 }
 
+pub fn createResource<T>(key: any, loader: fn() -> Promise<T>, options: any) -> any {
+  render.createResource(key, loader, options)
+}
+
+pub fn resourceStatus(resource: any) -> string {
+  render.resourceStatus(resource)
+}
+
+pub fn resourceData(resource: any) -> any {
+  render.resourceData(resource)
+}
+
+pub fn resourceError(resource: any) -> any {
+  render.resourceError(resource)
+}
+
+pub fn resourceRead<T>(resource: any) -> T {
+  render.resourceRead(resource)
+}
+
+pub fn resourceRefresh<T>(resource: any) -> Promise<T> {
+  render.resourceRefresh(resource)
+}
+
+pub fn resourceInvalidate(resource: any) -> void {
+  render.resourceInvalidate(resource)
+}
+
+pub fn resourceMutate<T>(resource: any, value: T) -> T {
+  render.resourceMutate(resource, value)
+}
+
+pub fn suspense(fallback: any, renderChildren: fn() -> any) -> VNode {
+  render.suspense(fallback, renderChildren)
+}
+
+pub fn errorBoundary(fallback: any, renderChildren: fn() -> any) -> VNode {
+  render.errorBoundary(fallback, renderChildren)
+}
+
 pub fn children(input: any) -> any {
   render.children(input)
 }

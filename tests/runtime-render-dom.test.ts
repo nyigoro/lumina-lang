@@ -1437,6 +1437,80 @@ describe('render DOM renderer', () => {
     expect(fakeDocument.body.childNodes).toHaveLength(0);
   });
 
+  test('resource suspense shows fallback first and then resolved content', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    let resolveLoad!: (value: string) => void;
+    const resource = render.createResource(`user:${Date.now()}:suspense`, () =>
+      new Promise<string>((resolve) => {
+        resolveLoad = resolve;
+      }),
+    0);
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.suspense(
+        render.element('div', { id: 'loading' }, [render.text('Loading')]),
+        () => render.element('div', { id: 'content' }, [render.text(render.resourceRead<string>(resource))])
+      )
+    );
+
+    const loading = container.childNodes[0] as FakeElement;
+    expect(loading.attributes.get('id')).toBe('loading');
+    expect(loading.childNodes[0]?.textContent).toBe('Loading');
+
+    resolveLoad('Ada');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const content = container.childNodes[0] as FakeElement;
+    expect(content.attributes.get('id')).toBe('content');
+    expect(content.childNodes[0]?.textContent).toBe('Ada');
+
+    render.dispose_reactive(mounted);
+  });
+
+  test('error boundary catches rejected resource reads after suspense settles', async () => {
+    const fakeDocument = new FakeDocument();
+    const renderer = render.create_dom_renderer({ document: fakeDocument as never });
+    const container = fakeDocument.createElement('div');
+    let rejectLoad!: (error: Error) => void;
+    const resource = render.createResource(
+      `user:${Date.now()}:error`,
+      () =>
+        new Promise<string>((_, reject) => {
+          rejectLoad = reject;
+        }),
+      0
+    );
+
+    const mounted = render.mount_reactive(renderer, container, () =>
+      render.suspense(
+        render.element('div', { id: 'loading' }, [render.text('Loading')]),
+        () => render.error_boundary(
+          (error: unknown) =>
+            render.element('div', { id: 'error' }, [render.text(String((error as Error)?.message ?? error))]),
+          () => render.element('div', { id: 'content' }, [render.text(render.resourceRead<string>(resource))])
+        )
+      )
+    );
+
+    const loading = container.childNodes[0] as FakeElement;
+    expect(loading.attributes.get('id')).toBe('loading');
+
+    rejectLoad(new Error('Request failed'));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const errorNode = container.childNodes[0] as FakeElement;
+    expect(errorNode.attributes.get('id')).toBe('error');
+    expect(errorNode.childNodes[0]?.textContent).toBe('Request failed');
+
+    render.dispose_reactive(mounted);
+  });
+
   test('headless checkbox toggles signal state and indicator visibility', async () => {
     const fakeDocument = new FakeDocument();
     const renderer = render.create_dom_renderer({ document: fakeDocument as never });
