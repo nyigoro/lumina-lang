@@ -7182,21 +7182,136 @@ interface PopoverContextValue {
   baseId: string;
 }
 
+interface TooltipContextValue {
+  open: Signal<boolean>;
+  baseId: string;
+}
+
+interface ToastContextValue {
+  open: Signal<boolean>;
+  baseId: string;
+  hasTitle: boolean;
+  hasDescription: boolean;
+}
+
 interface MenuContextValue {
   open: Signal<boolean>;
   baseId: string;
   order: string[];
 }
 
+interface CheckboxContextValue {
+  checked: Signal<boolean>;
+  baseId: string;
+}
+
+interface RadioGroupContextValue {
+  value: Signal<string>;
+  baseId: string;
+  order: string[];
+}
+
+interface RadioItemContextValue {
+  value: string;
+  itemId: string;
+  selected: boolean;
+}
+
+interface SelectContextValue {
+  open: Signal<boolean>;
+  value: Signal<string>;
+  baseId: string;
+  order: string[];
+}
+
+interface SelectItemContextValue {
+  value: string;
+  itemId: string;
+  selected: boolean;
+}
+
+interface ComboboxContextValue {
+  open: Signal<boolean>;
+  value: Signal<string>;
+  query: Signal<string>;
+  baseId: string;
+  order: string[];
+}
+
+interface ComboboxItemContextValue {
+  value: string;
+  itemId: string;
+  selected: boolean;
+}
+
+interface MultiselectContextValue {
+  open: Signal<boolean>;
+  values: Signal<string[]>;
+  baseId: string;
+  order: string[];
+}
+
+interface MultiselectItemContextValue {
+  value: string;
+  itemId: string;
+  selected: boolean;
+}
+
 const tabsContext = createContextToken<TabsContextValue>();
 const tabsRootIds = new WeakMap<object, string>();
 let nextTabsRootId = 1;
+
+const checkboxContext = createContextToken<CheckboxContextValue>();
+const checkboxRootIds = new WeakMap<object, string>();
+let nextCheckboxRootId = 1;
+
+const radioGroupContext = createContextToken<RadioGroupContextValue>();
+const radioItemContext = createContextToken<RadioItemContextValue>();
+const radioRootIds = new WeakMap<object, string>();
+let nextRadioRootId = 1;
+
+const selectContext = createContextToken<SelectContextValue>();
+const selectItemContext = createContextToken<SelectItemContextValue>();
+const selectRootIds = new WeakMap<object, string>();
+const selectAnchorTargets = new WeakMap<object, DomElementLike>();
+const selectRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextSelectRootId = 1;
+
+const comboboxContext = createContextToken<ComboboxContextValue>();
+const comboboxItemContext = createContextToken<ComboboxItemContextValue>();
+const comboboxRootIds = new WeakMap<object, string>();
+const comboboxAnchorTargets = new WeakMap<object, DomElementLike>();
+const comboboxRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextComboboxRootId = 1;
+
+const multiselectContext = createContextToken<MultiselectContextValue>();
+const multiselectItemContext = createContextToken<MultiselectItemContextValue>();
+const multiselectRootIds = new WeakMap<object, string>();
+const multiselectAnchorTargets = new WeakMap<object, DomElementLike>();
+const multiselectRestoreTargets = new WeakMap<object, { focus?: () => void }>();
+let nextMultiselectRootId = 1;
 
 const getTabsBaseId = (signal: Signal<string>): string => {
   const existing = tabsRootIds.get(signal as object);
   if (existing) return existing;
   const next = `lumina-tabs-${nextTabsRootId++}`;
   tabsRootIds.set(signal as object, next);
+  return next;
+};
+
+const getCheckboxBaseId = (signal: Signal<boolean>): string => {
+  const existing = checkboxRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-checkbox-${nextCheckboxRootId++}`;
+  checkboxRootIds.set(signal as object, next);
+  return next;
+};
+
+const getRadioBaseId = (signal: Signal<string>): string => {
+  const existing = radioRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-radio-${nextRadioRootId++}`;
+  radioRootIds.set(signal as object, next);
   return next;
 };
 
@@ -7254,6 +7369,16 @@ const popoverAnchorTargets = new WeakMap<object, DomElementLike>();
 const popoverRestoreTargets = new WeakMap<object, { focus?: () => void }>();
 let nextPopoverRootId = 1;
 
+const tooltipContext = createContextToken<TooltipContextValue>();
+const tooltipRootIds = new WeakMap<object, string>();
+const tooltipAnchorTargets = new WeakMap<object, DomElementLike>();
+let nextTooltipRootId = 1;
+
+const toastContext = createContextToken<ToastContextValue>();
+const toastRootIds = new WeakMap<object, string>();
+const toastTimers = new WeakMap<object, unknown>();
+let nextToastRootId = 1;
+
 const menuContext = createContextToken<MenuContextValue>();
 const menuRootIds = new WeakMap<object, string>();
 const menuAnchorTargets = new WeakMap<object, DomElementLike>();
@@ -7276,11 +7401,51 @@ const getPopoverBaseId = (signal: Signal<boolean>): string => {
   return next;
 };
 
+const getTooltipBaseId = (signal: Signal<boolean>): string => {
+  const existing = tooltipRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-tooltip-${nextTooltipRootId++}`;
+  tooltipRootIds.set(signal as object, next);
+  return next;
+};
+
+const getToastBaseId = (signal: Signal<boolean>): string => {
+  const existing = toastRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-toast-${nextToastRootId++}`;
+  toastRootIds.set(signal as object, next);
+  return next;
+};
+
 const getMenuBaseId = (signal: Signal<boolean>): string => {
   const existing = menuRootIds.get(signal as object);
   if (existing) return existing;
   const next = `lumina-menu-${nextMenuRootId++}`;
   menuRootIds.set(signal as object, next);
+  return next;
+};
+
+const getSelectBaseId = (signal: Signal<boolean>): string => {
+  const existing = selectRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-select-${nextSelectRootId++}`;
+  selectRootIds.set(signal as object, next);
+  return next;
+};
+
+const getComboboxBaseId = (signal: Signal<boolean>): string => {
+  const existing = comboboxRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-combobox-${nextComboboxRootId++}`;
+  comboboxRootIds.set(signal as object, next);
+  return next;
+};
+
+const getMultiselectBaseId = (signal: Signal<boolean>): string => {
+  const existing = multiselectRootIds.get(signal as object);
+  if (existing) return existing;
+  const next = `lumina-multiselect-${nextMultiselectRootId++}`;
+  multiselectRootIds.set(signal as object, next);
   return next;
 };
 
@@ -7300,6 +7465,21 @@ const getPopoverIds = (
   contentId: `${ctx.baseId}-content`,
 });
 
+const getTooltipIds = (
+  ctx: TooltipContextValue
+): { triggerId: string; contentId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getToastIds = (
+  ctx: ToastContextValue
+): { contentId: string; titleId: string; descriptionId: string } => ({
+  contentId: `${ctx.baseId}-content`,
+  titleId: `${ctx.baseId}-title`,
+  descriptionId: `${ctx.baseId}-description`,
+});
+
 const getMenuIds = (
   ctx: MenuContextValue
 ): { triggerId: string; contentId: string } => ({
@@ -7307,8 +7487,51 @@ const getMenuIds = (
   contentId: `${ctx.baseId}-content`,
 });
 
+const getSelectIds = (
+  ctx: SelectContextValue
+): { triggerId: string; contentId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getComboboxIds = (
+  ctx: ComboboxContextValue
+): { inputId: string; contentId: string } => ({
+  inputId: `${ctx.baseId}-input`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getMultiselectIds = (
+  ctx: MultiselectContextValue
+): { triggerId: string; contentId: string } => ({
+  triggerId: `${ctx.baseId}-trigger`,
+  contentId: `${ctx.baseId}-content`,
+});
+
+const getCheckboxIds = (ctx: CheckboxContextValue): { rootId: string; indicatorId: string } => ({
+  rootId: `${ctx.baseId}-root`,
+  indicatorId: `${ctx.baseId}-indicator`,
+});
+
 const getMenuItemId = (ctx: MenuContextValue, value: string): string =>
   `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getRadioItemId = (ctx: RadioGroupContextValue, value: string): string =>
+  `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getSelectItemId = (ctx: SelectContextValue, value: string): string =>
+  `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getComboboxItemId = (ctx: ComboboxContextValue, value: string): string =>
+  `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getMultiselectItemId = (ctx: MultiselectContextValue, value: string): string =>
+  `${ctx.baseId}-item-${normalizeTabsPart(value)}`;
+
+const getRadioIndicatorId = (itemId: string): string => `${itemId}-indicator`;
+const getSelectIndicatorId = (itemId: string): string => `${itemId}-indicator`;
+const getComboboxIndicatorId = (itemId: string): string => `${itemId}-indicator`;
+const getMultiselectIndicatorId = (itemId: string): string => `${itemId}-indicator`;
 
 const getFocusTargetFromEvent = (event: unknown): { focus?: () => void } | null => {
   if (!event || typeof event !== 'object') return null;
@@ -7322,6 +7545,19 @@ const elementRecord = (element: DomElementLike): Record<string, unknown> =>
 const readChildNodes = (
   node: { childNodes?: ArrayLike<DomNodeLike> | Iterable<DomNodeLike> } | null | undefined
 ): DomNodeLike[] => Array.from(node?.childNodes ?? []);
+
+const findDomElementById = (root: DomNodeLike | null | undefined, id: string): DomElementLike | null => {
+  if (!root) return null;
+  for (const child of readChildNodes(root)) {
+    const element = child as DomElementLike;
+    if (getDomAttribute(element, 'id') === id) {
+      return element;
+    }
+    const nested = findDomElementById(child, id);
+    if (nested) return nested;
+  }
+  return null;
+};
 
 const getDomAttribute = (element: DomElementLike, name: string): string | null => {
   if (typeof element.getAttribute === 'function') {
@@ -7437,6 +7673,32 @@ const restorePopoverFocus = (ctx: PopoverContextValue): void => {
   target.focus?.();
 };
 
+const clearToastTimer = (signal: Signal<boolean>): void => {
+  const key = signal as object;
+  const handle = toastTimers.get(key);
+  if (handle === undefined) return;
+  if (typeof globalThis.clearTimeout === 'function') {
+    globalThis.clearTimeout(handle as Parameters<typeof globalThis.clearTimeout>[0]);
+  }
+  toastTimers.delete(key);
+};
+
+const scheduleToastTimer = (ctx: ToastContextValue, duration: number): void => {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    clearToastTimer(ctx.open);
+    return;
+  }
+  if (typeof globalThis.setTimeout !== 'function') return;
+  const key = ctx.open as object;
+  const existing = toastTimers.get(key);
+  if (existing !== undefined) return;
+  const handle = globalThis.setTimeout(() => {
+    toastTimers.delete(key);
+    ctx.open.set(false);
+  }, duration);
+  toastTimers.set(key, handle);
+};
+
 const restoreMenuFocus = (ctx: MenuContextValue): void => {
   const key = ctx.open as object;
   const target = menuRestoreTargets.get(key);
@@ -7445,7 +7707,55 @@ const restoreMenuFocus = (ctx: MenuContextValue): void => {
   target.focus?.();
 };
 
+const restoreSelectFocus = (ctx: SelectContextValue): void => {
+  const key = ctx.open as object;
+  const target = selectRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  selectRestoreTargets.delete(key);
+  target.focus?.();
+};
+
+const restoreComboboxFocus = (ctx: ComboboxContextValue): void => {
+  const key = ctx.open as object;
+  const target = comboboxRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  comboboxRestoreTargets.delete(key);
+  target.focus?.();
+};
+
+const restoreMultiselectFocus = (ctx: MultiselectContextValue): void => {
+  const key = ctx.open as object;
+  const target = multiselectRestoreTargets.get(key);
+  if (!target || typeof target.focus !== 'function') return;
+  multiselectRestoreTargets.delete(key);
+  target.focus?.();
+};
+
 const registerMenuValue = (ctx: MenuContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const registerRadioValue = (ctx: RadioGroupContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const registerSelectValue = (ctx: SelectContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const registerComboboxValue = (ctx: ComboboxContextValue, value: string): void => {
+  if (!ctx.order.includes(value)) {
+    ctx.order.push(value);
+  }
+};
+
+const registerMultiselectValue = (ctx: MultiselectContextValue, value: string): void => {
   if (!ctx.order.includes(value)) {
     ctx.order.push(value);
   }
@@ -7470,6 +7780,87 @@ const getMenuNavigationTarget = (ctx: MenuContextValue, current: string, key: st
   return null;
 };
 
+const getRadioNavigationTarget = (ctx: RadioGroupContextValue, current: string, key: string): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowRight' || key === 'ArrowDown') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowLeft' || key === 'ArrowUp') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+
+  return null;
+};
+
+const getSelectNavigationTarget = (ctx: SelectContextValue, current: string, key: string): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowDown' || key === 'ArrowRight') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowUp' || key === 'ArrowLeft') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+  return null;
+};
+
+const getComboboxNavigationTarget = (ctx: ComboboxContextValue, current: string, key: string): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowDown' || key === 'ArrowRight') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowUp' || key === 'ArrowLeft') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+  return null;
+};
+
+const getMultiselectNavigationTarget = (
+  ctx: MultiselectContextValue,
+  current: string,
+  key: string
+): string | null => {
+  if (ctx.order.length === 0) return null;
+  const currentIndex = Math.max(0, ctx.order.indexOf(current));
+
+  if (key === 'Home') {
+    return ctx.order[0] ?? null;
+  }
+  if (key === 'End') {
+    return ctx.order[ctx.order.length - 1] ?? null;
+  }
+  if (key === 'ArrowDown' || key === 'ArrowRight') {
+    return ctx.order[(currentIndex + 1) % ctx.order.length] ?? null;
+  }
+  if (key === 'ArrowUp' || key === 'ArrowLeft') {
+    return ctx.order[(currentIndex - 1 + ctx.order.length) % ctx.order.length] ?? null;
+  }
+  return null;
+};
+
 const focusMenuItem = (
   documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
   ctx: MenuContextValue,
@@ -7482,9 +7873,96 @@ const focusMenuItem = (
   return true;
 };
 
+const focusRadioItem = (
+  documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
+  ctx: RadioGroupContextValue,
+  value: string,
+  fallbackRoot?: DomNodeLike | null
+): boolean => {
+  const targetId = getRadioItemId(ctx, value);
+  const target = (documentLike && typeof documentLike.getElementById === 'function'
+    ? documentLike.getElementById(targetId)
+    : null) ?? findDomElementById(fallbackRoot, targetId);
+  if (!target || typeof target.focus !== 'function') return false;
+  target.focus();
+  return true;
+};
+
+const focusSelectItem = (
+  documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
+  ctx: SelectContextValue,
+  value: string,
+  fallbackRoot?: DomNodeLike | null
+): boolean => {
+  const targetId = getSelectItemId(ctx, value);
+  const target = (documentLike && typeof documentLike.getElementById === 'function'
+    ? documentLike.getElementById(targetId)
+    : null) ?? findDomElementById(fallbackRoot, targetId);
+  if (!target || typeof target.focus !== 'function') return false;
+  target.focus();
+  return true;
+};
+
+const focusComboboxItem = (
+  documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
+  ctx: ComboboxContextValue,
+  value: string,
+  fallbackRoot?: DomNodeLike | null
+): boolean => {
+  const targetId = getComboboxItemId(ctx, value);
+  const target = (documentLike && typeof documentLike.getElementById === 'function'
+    ? documentLike.getElementById(targetId)
+    : null) ?? findDomElementById(fallbackRoot, targetId);
+  if (!target || typeof target.focus !== 'function') return false;
+  target.focus();
+  return true;
+};
+
+const focusMultiselectItem = (
+  documentLike: { getElementById?: (id: string) => DomElementLike | null } | null | undefined,
+  ctx: MultiselectContextValue,
+  value: string,
+  fallbackRoot?: DomNodeLike | null
+): boolean => {
+  const targetId = getMultiselectItemId(ctx, value);
+  const target = (documentLike && typeof documentLike.getElementById === 'function'
+    ? documentLike.getElementById(targetId)
+    : null) ?? findDomElementById(fallbackRoot, targetId);
+  if (!target || typeof target.focus !== 'function') return false;
+  target.focus();
+  return true;
+};
+
 const closeMenu = (ctx: MenuContextValue): void => {
   ctx.open.set(false);
   restoreMenuFocus(ctx);
+};
+
+const closeSelect = (ctx: SelectContextValue): void => {
+  ctx.open.set(false);
+  restoreSelectFocus(ctx);
+};
+
+const closeCombobox = (ctx: ComboboxContextValue): void => {
+  ctx.open.set(false);
+  restoreComboboxFocus(ctx);
+};
+
+const closeMultiselect = (ctx: MultiselectContextValue): void => {
+  ctx.open.set(false);
+  restoreMultiselectFocus(ctx);
+};
+
+const readStringSelection = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+
+const toggleMultiselectValue = (ctx: MultiselectContextValue, value: string): string[] => {
+  const current = readStringSelection(ctx.values.get());
+  const next = current.includes(value)
+    ? current.filter((entry) => entry !== value)
+    : [...current, value];
+  ctx.values.set(next);
+  return next;
 };
 
 const readNumericRectValue = (value: unknown): number | null => {
@@ -7522,6 +8000,66 @@ const getMenuAnchorRect = (
   return { left, top, right, bottom, width, height };
 };
 
+const getTooltipAnchorRect = (
+  ctx: TooltipContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = tooltipAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
+const getSelectAnchorRect = (
+  ctx: SelectContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = selectAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
+const getComboboxAnchorRect = (
+  ctx: ComboboxContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = comboboxAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
+const getMultiselectAnchorRect = (
+  ctx: MultiselectContextValue
+): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
+  const anchor = multiselectAnchorTargets.get(ctx.open as object);
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null;
+  const raw = anchor.getBoundingClientRect();
+  const left = readNumericRectValue(raw?.left) ?? 0;
+  const top = readNumericRectValue(raw?.top) ?? 0;
+  const right = readNumericRectValue(raw?.right) ?? left;
+  const bottom = readNumericRectValue(raw?.bottom) ?? top;
+  const width = readNumericRectValue(raw?.width) ?? Math.max(0, right - left);
+  const height = readNumericRectValue(raw?.height) ?? Math.max(0, bottom - top);
+  return { left, top, right, bottom, width, height };
+};
+
 type PopoverSide = 'top' | 'bottom' | 'left' | 'right';
 type PopoverAlign = 'start' | 'center' | 'end';
 
@@ -7548,6 +8086,20 @@ const omitPopoverLayoutProps = (
   delete next.side;
   delete next.align;
   delete next.offset;
+  return next;
+};
+
+const pickToastDuration = (props: Record<string, unknown> | null | undefined): number => {
+  const value = props?.duration;
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+};
+
+const omitToastControlProps = (
+  props: Record<string, unknown> | null | undefined
+): Record<string, unknown> | undefined => {
+  if (!props) return undefined;
+  const next = { ...props };
+  delete next.duration;
   return next;
 };
 
@@ -8045,6 +8597,219 @@ export const render = {
       children
     );
   },
+  tooltip_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.tooltip_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(tooltipContext, { open, baseId: getTooltipBaseId(open) }, renderChildren)
+    );
+  },
+  tooltip_portal: (children: VNodeInput = []): VNode => vnodePortal(null, children),
+  tooltip_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.tooltip_trigger');
+    const ctx = frameManager.useContext(tooltipContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getTooltipIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          'aria-describedby': open ? contentId : undefined,
+          'data-state': open ? 'open' : 'closed',
+          onMouseEnter: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              tooltipAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            ctx.open.set(true);
+          },
+          onMouseLeave: () => {
+            ctx.open.set(false);
+          },
+          onFocus: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              tooltipAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            ctx.open.set(true);
+          },
+          onBlur: () => {
+            ctx.open.set(false);
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  tooltip_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.tooltip_content');
+    const ctx = frameManager.useContext(tooltipContext);
+    const open = ctx.open.get();
+    const { contentId } = getTooltipIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'tooltip',
+          id: contentId,
+          hidden: !open,
+          'data-lumina-tooltip-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getTooltipAnchorRect(ctx), props),
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  toast_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
+    const frameManager = requireActiveFrameManager('render.toast_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(
+        toastContext,
+        { open, baseId: getToastBaseId(open), hasTitle: false, hasDescription: false },
+        renderChildren
+      )
+    );
+  },
+  toast_portal: (children: VNodeInput = []): VNode => vnodePortal(null, children),
+  toast_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.toast_content');
+    const ctx = frameManager.useContext(toastContext);
+    const open = ctx.open.get();
+    const { contentId, titleId, descriptionId } = getToastIds(ctx);
+    const duration = pickToastDuration(props);
+    if (open) {
+      scheduleToastTimer(ctx, duration);
+    } else {
+      clearToastTimer(ctx.open);
+    }
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'status',
+          id: contentId,
+          'aria-live': 'polite',
+          'aria-atomic': 'true',
+          'aria-labelledby': ctx.hasTitle ? titleId : undefined,
+          'aria-describedby': ctx.hasDescription ? descriptionId : undefined,
+          hidden: !open,
+          tabIndex: 0,
+          'data-lumina-toast-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          style: {
+            position: 'fixed',
+            top: '16px',
+            right: '16px',
+            zIndex: '1002',
+          },
+          onKeyDown: (event?: KeyboardEvent) => {
+            if (String(event?.key ?? '') !== 'Escape') return undefined;
+            event?.preventDefault?.();
+            clearToastTimer(ctx.open);
+            ctx.open.set(false);
+            return false;
+          },
+        },
+        omitToastControlProps(props)
+      ),
+      children
+    );
+  },
+  toast_title: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.toast_title');
+    const ctx = frameManager.useContext(toastContext);
+    ctx.hasTitle = true;
+    const { titleId } = getToastIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          id: titleId,
+          'data-lumina-toast-title': 'true',
+        },
+        props
+      ),
+      children
+    );
+  },
+  toast_description: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.toast_description');
+    const ctx = frameManager.useContext(toastContext);
+    ctx.hasDescription = true;
+    const { descriptionId } = getToastIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          id: descriptionId,
+          'data-lumina-toast-description': 'true',
+        },
+        props
+      ),
+      children
+    );
+  },
+  toast_close: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.toast_close');
+    const ctx = frameManager.useContext(toastContext);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          'data-lumina-toast-close': 'true',
+          onClick: () => {
+            clearToastTimer(ctx.open);
+            ctx.open.set(false);
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  toastRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+    render.toast_root(open, renderChildren),
+  toastPortal: (children: VNodeInput = []): VNode => render.toast_portal(children),
+  toastContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.toast_content(props, children),
+  toastTitle: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.toast_title(props, children),
+  toastDescription: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.toast_description(props, children),
+  toastClose: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.toast_close(props, children),
   menu_root: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode => {
     const frameManager = requireActiveFrameManager('render.menu_root');
     return coerceRenderableToVNode(
@@ -8224,6 +8989,969 @@ export const render = {
       children
     );
   },
+  select_root: (
+    open: Signal<boolean>,
+    value: Signal<string>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(selectContext, { open, value, baseId: getSelectBaseId(open), order: [] }, renderChildren)
+    );
+  },
+  select_portal: (children: VNodeInput = []): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_portal');
+    const ctx = frameManager.useContext(selectContext);
+    const open = ctx.open.get();
+    const dismissLayer = vnodeElement(
+      'div',
+      {
+        'data-lumina-select-dismiss': 'true',
+        'data-state': open ? 'open' : 'closed',
+        hidden: !open,
+        style: {
+          position: 'fixed',
+          inset: '0',
+          background: 'transparent',
+          zIndex: '1000',
+        },
+        onClick: () => {
+          closeSelect(ctx);
+        },
+      },
+      []
+    );
+    return vnodePortal(null, [dismissLayer, ...normalizeVNodeChildren(resolveChildrenInput(children))]);
+  },
+  select_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_trigger');
+    const ctx = frameManager.useContext(selectContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getSelectIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          role: 'combobox',
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              selectRestoreTargets.set(ctx.open as object, target);
+              selectAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            const nextOpen = !ctx.open.get();
+            ctx.open.set(nextOpen);
+            if (!nextOpen) {
+              restoreSelectFocus(ctx);
+            }
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  select_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_content');
+    const ctx = frameManager.useContext(selectContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getSelectIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'listbox',
+          id: contentId,
+          'aria-labelledby': triggerId,
+          hidden: !open,
+          tabIndex: -1,
+          autoFocus: open,
+          'data-lumina-select-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getSelectAnchorRect(ctx), props),
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeSelect(ctx);
+              return false;
+            }
+            if (key === 'ArrowDown' || key === 'Home') {
+              event?.preventDefault?.();
+              focusSelectItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.value.get() && ctx.order.includes(ctx.value.get()) ? ctx.value.get() : (ctx.order[0] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            if (key === 'ArrowUp' || key === 'End') {
+              event?.preventDefault?.();
+              focusSelectItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.value.get() && ctx.order.includes(ctx.value.get())
+                  ? ctx.value.get()
+                  : (ctx.order[ctx.order.length - 1] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            return undefined;
+          },
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  select_item: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_item');
+    const ctx = frameManager.useContext(selectContext);
+    registerSelectValue(ctx, value);
+    const open = ctx.open.get();
+    const currentValue = ctx.value.get();
+    const selected = currentValue === value;
+    const itemId = getSelectItemId(ctx, value);
+    const isFirst = ctx.order[0] === value;
+    const shouldAutoFocus = open && (selected || (!ctx.order.includes(currentValue) && isFirst));
+    return coerceRenderableToVNode(
+      frameManager.withContext(selectItemContext, { value, itemId, selected }, () =>
+        vnodeElement(
+          'button',
+          mergeProps(
+            {
+              type: 'button',
+              id: itemId,
+              role: 'option',
+              hidden: !open,
+              tabIndex: open ? (selected ? 0 : -1) : -1,
+              autoFocus: shouldAutoFocus,
+              'aria-selected': selected ? 'true' : 'false',
+              'data-lumina-select-item': 'true',
+              'data-state': selected ? 'checked' : 'unchecked',
+              onClick: () => {
+                ctx.value.set(value);
+                closeSelect(ctx);
+              },
+              onKeyDown: (event?: KeyboardEvent) => {
+                const key = String(event?.key ?? '');
+                if (key === 'Escape') {
+                  event?.preventDefault?.();
+                  closeSelect(ctx);
+                  return false;
+                }
+                if (key === 'Enter' || key === ' ') {
+                  event?.preventDefault?.();
+                  ctx.value.set(value);
+                  closeSelect(ctx);
+                  return false;
+                }
+                const nextValue = getSelectNavigationTarget(ctx, value, key);
+                if (!nextValue) return undefined;
+                event?.preventDefault?.();
+                ctx.value.set(nextValue);
+                focusSelectItem(
+                  (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                  ctx,
+                  nextValue,
+                  getFocusTargetFromEvent(event) as DomNodeLike | null
+                );
+                return false;
+              },
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        )
+      )
+    );
+  },
+  select_indicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.select_indicator');
+    const ctx = frameManager.useContext(selectItemContext);
+    return vnodeElement(
+      'span',
+      mergeProps(
+        {
+          id: getSelectIndicatorId(ctx.itemId),
+          'aria-hidden': 'true',
+          hidden: !ctx.selected,
+          'data-lumina-select-indicator': 'true',
+          'data-state': ctx.selected ? 'checked' : 'unchecked',
+        },
+        props
+      ),
+      children
+    );
+  },
+  selectRoot: (
+    open: Signal<boolean>,
+    value: Signal<string>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.select_root(open, value, renderChildren),
+  selectPortal: (children: VNodeInput = []): VNode => render.select_portal(children),
+  selectTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.select_trigger(props, children),
+  selectContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.select_content(props, children),
+  selectItem: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.select_item(value, props, renderChildren),
+  selectIndicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.select_indicator(props, children),
+  combobox_root: (
+    open: Signal<boolean>,
+    value: Signal<string>,
+    query: Signal<string>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(
+        comboboxContext,
+        { open, value, query, baseId: getComboboxBaseId(open), order: [] },
+        renderChildren
+      )
+    );
+  },
+  combobox_portal: (children: VNodeInput = []): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_portal');
+    const ctx = frameManager.useContext(comboboxContext);
+    const open = ctx.open.get();
+    const dismissLayer = vnodeElement(
+      'div',
+      {
+        'data-lumina-combobox-dismiss': 'true',
+        'data-state': open ? 'open' : 'closed',
+        hidden: !open,
+        style: {
+          position: 'fixed',
+          inset: '0',
+          background: 'transparent',
+          zIndex: '1000',
+        },
+        onClick: () => {
+          closeCombobox(ctx);
+        },
+      },
+      []
+    );
+    return vnodePortal(null, [dismissLayer, ...normalizeVNodeChildren(resolveChildrenInput(children))]);
+  },
+  combobox_input: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_input');
+    const ctx = frameManager.useContext(comboboxContext);
+    const open = ctx.open.get();
+    const { inputId, contentId } = getComboboxIds(ctx);
+    return vnodeElement(
+      'input',
+      mergeProps(
+        {
+          type: 'text',
+          id: inputId,
+          role: 'combobox',
+          value: ctx.query.get(),
+          'aria-autocomplete': 'list',
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onInput: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              comboboxRestoreTargets.set(ctx.open as object, target);
+              comboboxAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            const nextQuery = String(((event as { target?: { value?: unknown } } | undefined)?.target?.value ?? ''));
+            ctx.query.set(nextQuery);
+            ctx.open.set(true);
+          },
+          onFocus: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (!target) return undefined;
+            comboboxRestoreTargets.set(ctx.open as object, target);
+            comboboxAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            ctx.open.set(true);
+            return undefined;
+          },
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (!target) return undefined;
+            comboboxRestoreTargets.set(ctx.open as object, target);
+            comboboxAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            ctx.open.set(true);
+            return undefined;
+          },
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeCombobox(ctx);
+              return false;
+            }
+            if (key === 'ArrowDown' || key === 'Home') {
+              event?.preventDefault?.();
+              ctx.open.set(true);
+              const currentValue = ctx.value.get();
+              focusComboboxItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                currentValue && ctx.order.includes(currentValue) ? currentValue : (ctx.order[0] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            if (key === 'ArrowUp' || key === 'End') {
+              event?.preventDefault?.();
+              ctx.open.set(true);
+              const currentValue = ctx.value.get();
+              focusComboboxItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                currentValue && ctx.order.includes(currentValue)
+                  ? currentValue
+                  : (ctx.order[ctx.order.length - 1] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            return undefined;
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  combobox_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_content');
+    const ctx = frameManager.useContext(comboboxContext);
+    const open = ctx.open.get();
+    const { inputId, contentId } = getComboboxIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'listbox',
+          id: contentId,
+          'aria-labelledby': inputId,
+          hidden: !open,
+          tabIndex: -1,
+          'data-lumina-combobox-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getComboboxAnchorRect(ctx), props),
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeCombobox(ctx);
+              return false;
+            }
+            if (key === 'ArrowDown' || key === 'Home') {
+              event?.preventDefault?.();
+              focusComboboxItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.value.get() && ctx.order.includes(ctx.value.get()) ? ctx.value.get() : (ctx.order[0] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            if (key === 'ArrowUp' || key === 'End') {
+              event?.preventDefault?.();
+              focusComboboxItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                ctx.value.get() && ctx.order.includes(ctx.value.get())
+                  ? ctx.value.get()
+                  : (ctx.order[ctx.order.length - 1] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            return undefined;
+          },
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  combobox_item: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_item');
+    const ctx = frameManager.useContext(comboboxContext);
+    const open = ctx.open.get();
+    const query = ctx.query.get().trim().toLowerCase();
+    const matchesQuery = query.length === 0 || value.toLowerCase().includes(query);
+    if (matchesQuery) {
+      registerComboboxValue(ctx, value);
+    }
+    const currentValue = ctx.value.get();
+    const selected = currentValue === value;
+    const itemId = getComboboxItemId(ctx, value);
+    return coerceRenderableToVNode(
+      frameManager.withContext(comboboxItemContext, { value, itemId, selected }, () =>
+        vnodeElement(
+          'button',
+          mergeProps(
+            {
+              type: 'button',
+              id: itemId,
+              role: 'option',
+              hidden: !open || !matchesQuery,
+              tabIndex: open && matchesQuery ? (selected ? 0 : -1) : -1,
+              'aria-selected': selected ? 'true' : 'false',
+              'data-lumina-combobox-item': 'true',
+              'data-state': selected ? 'checked' : 'unchecked',
+              onClick: () => {
+                ctx.value.set(value);
+                ctx.query.set(value);
+                closeCombobox(ctx);
+              },
+              onKeyDown: (event?: KeyboardEvent) => {
+                const key = String(event?.key ?? '');
+                if (key === 'Escape') {
+                  event?.preventDefault?.();
+                  closeCombobox(ctx);
+                  return false;
+                }
+                if (key === 'Enter' || key === ' ') {
+                  event?.preventDefault?.();
+                  ctx.value.set(value);
+                  ctx.query.set(value);
+                  closeCombobox(ctx);
+                  return false;
+                }
+                const nextValue = getComboboxNavigationTarget(ctx, value, key);
+                if (!nextValue) return undefined;
+                event?.preventDefault?.();
+                ctx.value.set(nextValue);
+                ctx.query.set(nextValue);
+                focusComboboxItem(
+                  (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                  ctx,
+                  nextValue,
+                  getFocusTargetFromEvent(event) as DomNodeLike | null
+                );
+                return false;
+              },
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        )
+      )
+    );
+  },
+  combobox_indicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.combobox_indicator');
+    const ctx = frameManager.useContext(comboboxItemContext);
+    return vnodeElement(
+      'span',
+      mergeProps(
+        {
+          id: getComboboxIndicatorId(ctx.itemId),
+          'aria-hidden': 'true',
+          hidden: !ctx.selected,
+          'data-lumina-combobox-indicator': 'true',
+          'data-state': ctx.selected ? 'checked' : 'unchecked',
+        },
+        props
+      ),
+      children
+    );
+  },
+  comboboxRoot: (
+    open: Signal<boolean>,
+    value: Signal<string>,
+    query: Signal<string>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.combobox_root(open, value, query, renderChildren),
+  comboboxPortal: (children: VNodeInput = []): VNode => render.combobox_portal(children),
+  comboboxInput: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.combobox_input(props, children),
+  comboboxContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.combobox_content(props, children),
+  comboboxItem: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.combobox_item(value, props, renderChildren),
+  comboboxIndicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.combobox_indicator(props, children),
+  multiselect_root: (
+    open: Signal<boolean>,
+    values: Signal<string[]>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(multiselectContext, { open, values, baseId: getMultiselectBaseId(open), order: [] }, renderChildren)
+    );
+  },
+  multiselect_portal: (children: VNodeInput = []): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_portal');
+    const ctx = frameManager.useContext(multiselectContext);
+    const open = ctx.open.get();
+    const dismissLayer = vnodeElement(
+      'div',
+      {
+        'data-lumina-multiselect-dismiss': 'true',
+        'data-state': open ? 'open' : 'closed',
+        hidden: !open,
+        style: {
+          position: 'fixed',
+          inset: '0',
+          background: 'transparent',
+          zIndex: '1000',
+        },
+        onClick: () => {
+          closeMultiselect(ctx);
+        },
+      },
+      []
+    );
+    return vnodePortal(null, [dismissLayer, ...normalizeVNodeChildren(resolveChildrenInput(children))]);
+  },
+  multiselect_trigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_trigger');
+    const ctx = frameManager.useContext(multiselectContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getMultiselectIds(ctx);
+    return vnodeElement(
+      'button',
+      mergeProps(
+        {
+          type: 'button',
+          id: triggerId,
+          role: 'combobox',
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-controls': contentId,
+          'data-state': open ? 'open' : 'closed',
+          onClick: (event?: Event) => {
+            const target = getFocusTargetFromEvent(event);
+            if (target) {
+              multiselectRestoreTargets.set(ctx.open as object, target);
+              multiselectAnchorTargets.set(ctx.open as object, target as DomElementLike);
+            }
+            const nextOpen = !ctx.open.get();
+            ctx.open.set(nextOpen);
+            if (!nextOpen) {
+              restoreMultiselectFocus(ctx);
+            }
+          },
+        },
+        props
+      ),
+      children
+    );
+  },
+  multiselect_content: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_content');
+    const ctx = frameManager.useContext(multiselectContext);
+    const open = ctx.open.get();
+    const { triggerId, contentId } = getMultiselectIds(ctx);
+    return vnodeElement(
+      'div',
+      mergeProps(
+        {
+          role: 'listbox',
+          id: contentId,
+          'aria-labelledby': triggerId,
+          'aria-multiselectable': 'true',
+          hidden: !open,
+          tabIndex: -1,
+          autoFocus: open,
+          'data-lumina-multiselect-content': 'true',
+          'data-state': open ? 'open' : 'closed',
+          'data-side': pickPopoverSide(props),
+          style: getPopoverContentStyle(getMultiselectAnchorRect(ctx), props),
+          onKeyDown: (event?: KeyboardEvent) => {
+            const key = String(event?.key ?? '');
+            if (key === 'Escape') {
+              event?.preventDefault?.();
+              closeMultiselect(ctx);
+              return false;
+            }
+            const currentValues = readStringSelection(ctx.values.get());
+            if (key === 'ArrowDown' || key === 'Home') {
+              event?.preventDefault?.();
+              focusMultiselectItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                currentValues.find((entry) => ctx.order.includes(entry)) ?? (ctx.order[0] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            if (key === 'ArrowUp' || key === 'End') {
+              event?.preventDefault?.();
+              focusMultiselectItem(
+                (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                ctx,
+                [...currentValues].reverse().find((entry) => ctx.order.includes(entry))
+                  ?? (ctx.order[ctx.order.length - 1] ?? ''),
+                getFocusTargetFromEvent(event) as DomNodeLike | null
+              );
+              return false;
+            }
+            return undefined;
+          },
+        },
+        omitPopoverLayoutProps(props)
+      ),
+      children
+    );
+  },
+  multiselect_item: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_item');
+    const ctx = frameManager.useContext(multiselectContext);
+    registerMultiselectValue(ctx, value);
+    const open = ctx.open.get();
+    const selectedValues = readStringSelection(ctx.values.get());
+    const selected = selectedValues.includes(value);
+    const itemId = getMultiselectItemId(ctx, value);
+    const firstSelected = selectedValues.find((entry) => ctx.order.includes(entry));
+    const isFirst = ctx.order[0] === value;
+    const shouldAutoFocus = open && ((selected && value === firstSelected) || (!firstSelected && isFirst));
+    return coerceRenderableToVNode(
+      frameManager.withContext(multiselectItemContext, { value, itemId, selected }, () =>
+        vnodeElement(
+          'button',
+          mergeProps(
+            {
+              type: 'button',
+              id: itemId,
+              role: 'option',
+              hidden: !open,
+              tabIndex: open ? (selected ? 0 : -1) : -1,
+              autoFocus: shouldAutoFocus,
+              'aria-selected': selected ? 'true' : 'false',
+              'data-lumina-multiselect-item': 'true',
+              'data-state': selected ? 'checked' : 'unchecked',
+              onClick: () => {
+                toggleMultiselectValue(ctx, value);
+              },
+              onKeyDown: (event?: KeyboardEvent) => {
+                const key = String(event?.key ?? '');
+                if (key === 'Escape') {
+                  event?.preventDefault?.();
+                  closeMultiselect(ctx);
+                  return false;
+                }
+                if (key === 'Enter' || key === ' ') {
+                  event?.preventDefault?.();
+                  toggleMultiselectValue(ctx, value);
+                  return false;
+                }
+                const nextValue = getMultiselectNavigationTarget(ctx, value, key);
+                if (!nextValue) return undefined;
+                event?.preventDefault?.();
+                focusMultiselectItem(
+                  (getFocusTargetFromEvent(event) as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                  ctx,
+                  nextValue,
+                  getFocusTargetFromEvent(event) as DomNodeLike | null
+                );
+                return false;
+              },
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        )
+      )
+    );
+  },
+  multiselect_indicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.multiselect_indicator');
+    const ctx = frameManager.useContext(multiselectItemContext);
+    return vnodeElement(
+      'span',
+      mergeProps(
+        {
+          id: getMultiselectIndicatorId(ctx.itemId),
+          'aria-hidden': 'true',
+          hidden: !ctx.selected,
+          'data-lumina-multiselect-indicator': 'true',
+          'data-state': ctx.selected ? 'checked' : 'unchecked',
+        },
+        props
+      ),
+      children
+    );
+  },
+  multiselectRoot: (
+    open: Signal<boolean>,
+    values: Signal<string[]>,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.multiselect_root(open, values, renderChildren),
+  multiselectPortal: (children: VNodeInput = []): VNode => render.multiselect_portal(children),
+  multiselectTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.multiselect_trigger(props, children),
+  multiselectContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.multiselect_content(props, children),
+  multiselectItem: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.multiselect_item(value, props, renderChildren),
+  multiselectIndicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.multiselect_indicator(props, children),
+  checkbox_root: (
+    checked: Signal<boolean>,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.checkbox_root');
+    return coerceRenderableToVNode(
+      frameManager.withContext(checkboxContext, { checked, baseId: getCheckboxBaseId(checked) }, () => {
+        const ctx = frameManager.useContext(checkboxContext);
+        const current = ctx.checked.get();
+        const { rootId, indicatorId } = getCheckboxIds(ctx);
+        return vnodeElement(
+          'button',
+          mergeProps(
+            {
+              type: 'button',
+              id: rootId,
+              role: 'checkbox',
+              'aria-checked': current ? 'true' : 'false',
+              'aria-controls': indicatorId,
+              tabIndex: 0,
+              'data-lumina-checkbox-root': 'true',
+              'data-state': current ? 'checked' : 'unchecked',
+              onClick: () => {
+                ctx.checked.set(!ctx.checked.get());
+              },
+              onKeyDown: (event?: KeyboardEvent) => {
+                const key = String(event?.key ?? '');
+                if (key !== 'Enter' && key !== ' ') return undefined;
+                event?.preventDefault?.();
+                ctx.checked.set(!ctx.checked.get());
+                return false;
+              },
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        );
+      })
+    );
+  },
+  checkbox_indicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.checkbox_indicator');
+    const ctx = frameManager.useContext(checkboxContext);
+    const current = ctx.checked.get();
+    const { indicatorId } = getCheckboxIds(ctx);
+    return vnodeElement(
+      'span',
+      mergeProps(
+        {
+          id: indicatorId,
+          'aria-hidden': 'true',
+          hidden: !current,
+          'data-lumina-checkbox-indicator': 'true',
+          'data-state': current ? 'checked' : 'unchecked',
+        },
+        props
+      ),
+      children
+    );
+  },
+  checkboxRoot: (
+    checked: Signal<boolean>,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.checkbox_root(checked, props, renderChildren),
+  checkboxIndicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.checkbox_indicator(props, children),
+  radio_group: (
+    value: Signal<string>,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.radio_group');
+    return coerceRenderableToVNode(
+      frameManager.withContext(radioGroupContext, { value, baseId: getRadioBaseId(value), order: [] }, () =>
+        vnodeElement(
+          'div',
+          mergeProps(
+            {
+              role: 'radiogroup',
+              'data-lumina-radio-group': 'true',
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        )
+      )
+    );
+  },
+  radio_item: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.radio_item');
+    const ctx = frameManager.useContext(radioGroupContext);
+    registerRadioValue(ctx, value);
+    const selected = ctx.value.get() === value;
+    const itemId = getRadioItemId(ctx, value);
+    return coerceRenderableToVNode(
+      frameManager.withContext(radioItemContext, { value, itemId, selected }, () =>
+        vnodeElement(
+          'button',
+          mergeProps(
+            {
+              type: 'button',
+              id: itemId,
+              role: 'radio',
+              'aria-checked': selected ? 'true' : 'false',
+              tabIndex: selected ? 0 : -1,
+              'data-lumina-radio-item': 'true',
+              'data-state': selected ? 'checked' : 'unchecked',
+              onClick: () => {
+                ctx.value.set(value);
+              },
+              onKeyDown: (event?: KeyboardEvent) => {
+                const key = String(event?.key ?? '');
+                if (key === 'Enter' || key === ' ') {
+                  event?.preventDefault?.();
+                  ctx.value.set(value);
+                  return false;
+                }
+                const nextValue = getRadioNavigationTarget(ctx, value, key);
+                if (!nextValue) return undefined;
+                event?.preventDefault?.();
+                ctx.value.set(nextValue);
+                const focusTarget = getFocusTargetFromEvent(event) as DomElementLike | null;
+                focusRadioItem(
+                  (focusTarget as { ownerDocument?: DomDocumentLike } | null)?.ownerDocument,
+                  ctx,
+                  nextValue,
+                  focusTarget?.parentNode ?? null
+                );
+                return false;
+              },
+            },
+            props
+          ),
+          resolveChildrenInput(renderChildren)
+        )
+      )
+    );
+  },
+  radio_indicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => {
+    const frameManager = requireActiveFrameManager('render.radio_indicator');
+    const ctx = frameManager.useContext(radioItemContext);
+    return vnodeElement(
+      'span',
+      mergeProps(
+        {
+          id: getRadioIndicatorId(ctx.itemId),
+          'aria-hidden': 'true',
+          hidden: !ctx.selected,
+          'data-lumina-radio-indicator': 'true',
+          'data-state': ctx.selected ? 'checked' : 'unchecked',
+        },
+        props
+      ),
+      children
+    );
+  },
+  radioGroup: (
+    value: Signal<string>,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.radio_group(value, props, renderChildren),
+  radioItem: (
+    value: string,
+    props: Record<string, unknown> | null | undefined,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.radio_item(value, props, renderChildren),
+  radioIndicator: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.radio_indicator(props, children),
   portalBody: (children: VNodeInput = []): VNode => render.portal_body(children),
   tabsRoot: (value: Signal<string>, renderChildren: () => ComponentRenderable): VNode =>
     render.tabs_root(value, renderChildren),
@@ -8276,6 +10004,17 @@ export const render = {
     props: Record<string, unknown> | null | undefined,
     children: VNodeInput = []
   ): VNode => render.popover_content(props, children),
+  tooltipRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+    render.tooltip_root(open, renderChildren),
+  tooltipPortal: (children: VNodeInput = []): VNode => render.tooltip_portal(children),
+  tooltipTrigger: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.tooltip_trigger(props, children),
+  tooltipContent: (
+    props: Record<string, unknown> | null | undefined,
+    children: VNodeInput = []
+  ): VNode => render.tooltip_content(props, children),
   menuRoot: (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
     render.menu_root(open, renderChildren),
   menuPortal: (children: VNodeInput = []): VNode => render.menu_portal(children),
@@ -8325,6 +10064,9 @@ export const render = {
   props_id: (id: string): Record<string, unknown> => ({ id }),
   props_style: (style: string): Record<string, unknown> => ({ style }),
   props_value: (value: string): Record<string, unknown> => ({ value }),
+  props_checked: (checked: boolean): Record<string, unknown> => ({ checked }),
+  props_type: (type: string): Record<string, unknown> => ({ type }),
+  props_name: (name: string): Record<string, unknown> => ({ name }),
   props_placeholder: (placeholder: string): Record<string, unknown> => ({ placeholder }),
   props_href: (href: string): Record<string, unknown> => ({ href }),
   props_disabled: (disabled: boolean): Record<string, unknown> => ({ disabled }),
@@ -8333,6 +10075,16 @@ export const render = {
     }),
   props_on_change: (handler: (value: string) => unknown): Record<string, unknown> => ({
       onChange: (e: Event) => handler(((e.target as HTMLInputElement | null)?.value ?? '')),
+    }),
+  props_on_checked_change: (handler: (checked: boolean) => unknown): Record<string, unknown> => ({
+      onChange: (e: Event) => handler(!!((e.target as HTMLInputElement | null)?.checked)),
+    }),
+  props_on_submit: (handler: (() => unknown) | null | undefined): Record<string, unknown> => ({
+      onSubmit: (event?: Event) => {
+        event?.preventDefault?.();
+        if (typeof handler !== 'function') return undefined;
+        return handler();
+      },
     }),
   props_key: (key: string): Record<string, unknown> => ({ key }),
   props_merge: (left: unknown, right: unknown): Record<string, unknown> => mergeProps(left, right),
@@ -8532,6 +10284,36 @@ export const popoverContent = (
   props: Record<string, unknown> | null | undefined,
   children: VNodeInput = []
 ): VNode => render.popover_content(props, children);
+export const tooltipRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+  render.tooltip_root(open, renderChildren);
+export const tooltipPortal = (children: VNodeInput = []): VNode => render.tooltip_portal(children);
+export const tooltipTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.tooltip_trigger(props, children);
+export const tooltipContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.tooltip_content(props, children);
+export const toastRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
+  render.toast_root(open, renderChildren);
+export const toastPortal = (children: VNodeInput = []): VNode => render.toast_portal(children);
+export const toastContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.toast_content(props, children);
+export const toastTitle = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.toast_title(props, children);
+export const toastDescription = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.toast_description(props, children);
+export const toastClose = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.toast_close(props, children);
 export const menuRoot = (open: Signal<boolean>, renderChildren: () => ComponentRenderable): VNode =>
   render.menu_root(open, renderChildren);
 export const menuPortal = (children: VNodeInput = []): VNode => render.menu_portal(children);
@@ -8548,6 +10330,99 @@ export const menuItem = (
   props: Record<string, unknown> | null | undefined,
   children: VNodeInput = []
 ): VNode => render.menu_item(value, props, children);
+export const selectRoot = (
+  open: Signal<boolean>,
+  value: Signal<string>,
+  renderChildren: () => ComponentRenderable
+): VNode => render.select_root(open, value, renderChildren);
+export const selectPortal = (children: VNodeInput = []): VNode => render.select_portal(children);
+export const selectTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.select_trigger(props, children);
+export const selectContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.select_content(props, children);
+export const selectItem = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.select_item(value, props, renderChildren);
+export const selectIndicator = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.select_indicator(props, children);
+export const comboboxRoot = (
+  open: Signal<boolean>,
+  value: Signal<string>,
+  query: Signal<string>,
+  renderChildren: () => ComponentRenderable
+): VNode => render.combobox_root(open, value, query, renderChildren);
+export const comboboxPortal = (children: VNodeInput = []): VNode => render.combobox_portal(children);
+export const comboboxInput = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.combobox_input(props, children);
+export const comboboxContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.combobox_content(props, children);
+export const comboboxItem = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.combobox_item(value, props, renderChildren);
+export const comboboxIndicator = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.combobox_indicator(props, children);
+export const multiselectRoot = (
+  open: Signal<boolean>,
+  values: Signal<string[]>,
+  renderChildren: () => ComponentRenderable
+): VNode => render.multiselect_root(open, values, renderChildren);
+export const multiselectPortal = (children: VNodeInput = []): VNode => render.multiselect_portal(children);
+export const multiselectTrigger = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.multiselect_trigger(props, children);
+export const multiselectContent = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.multiselect_content(props, children);
+export const multiselectItem = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.multiselect_item(value, props, renderChildren);
+export const multiselectIndicator = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.multiselect_indicator(props, children);
+export const checkboxRoot = (
+  checked: Signal<boolean>,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.checkbox_root(checked, props, renderChildren);
+export const checkboxIndicator = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.checkbox_indicator(props, children);
+export const radioGroup = (
+  value: Signal<string>,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.radio_group(value, props, renderChildren);
+export const radioItem = (
+  value: string,
+  props: Record<string, unknown> | null | undefined,
+  renderChildren: () => ComponentRenderable
+): VNode => render.radio_item(value, props, renderChildren);
+export const radioIndicator = (
+  props: Record<string, unknown> | null | undefined,
+  children: VNodeInput = []
+): VNode => render.radio_indicator(props, children);
 export const vnode = (tag: string, attrs?: Record<string, unknown> | null, children: VNodeInput = []): VNode =>
   render.element(tag, attrs, children);
 export const text = (value: unknown): VNode => render.text(value);
@@ -8568,11 +10443,18 @@ export const props_on_click_dec = (signal: Signal<number>): Record<string, unkno
 export const props_id = (id: string): Record<string, unknown> => render.props_id(id);
 export const props_style = (style: string): Record<string, unknown> => render.props_style(style);
 export const props_value = (value: string): Record<string, unknown> => render.props_value(value);
+export const props_checked = (checked: boolean): Record<string, unknown> => render.props_checked(checked);
+export const props_type = (type: string): Record<string, unknown> => render.props_type(type);
+export const props_name = (name: string): Record<string, unknown> => render.props_name(name);
 export const props_placeholder = (placeholder: string): Record<string, unknown> => render.props_placeholder(placeholder);
 export const props_href = (href: string): Record<string, unknown> => render.props_href(href);
 export const props_disabled = (disabled: boolean): Record<string, unknown> => render.props_disabled(disabled);
 export const props_on_input = (handler: (value: string) => unknown): Record<string, unknown> => render.props_on_input(handler);
 export const props_on_change = (handler: (value: string) => unknown): Record<string, unknown> => render.props_on_change(handler);
+export const props_on_checked_change = (handler: (checked: boolean) => unknown): Record<string, unknown> =>
+  render.props_on_checked_change(handler);
+export const props_on_submit = (handler: (() => unknown) | null | undefined): Record<string, unknown> =>
+  render.props_on_submit(handler);
 export const props_key = (key: string): Record<string, unknown> => render.props_key(key);
 export const props_merge = (left: unknown, right: unknown): Record<string, unknown> => render.props_merge(left, right);
 export const dom_get_element_by_id = (id: string): unknown => render.dom_get_element_by_id(id);

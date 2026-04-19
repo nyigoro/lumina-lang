@@ -160,6 +160,46 @@ pub fn popoverContent(props: any, children: any) -> VNode {
   render.popoverContent(props, children)
 }
 
+pub fn tooltipRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.tooltipRoot(open, renderChildren)
+}
+
+pub fn tooltipPortal(children: any) -> VNode {
+  render.tooltipPortal(children)
+}
+
+pub fn tooltipTrigger(props: any, children: any) -> VNode {
+  render.tooltipTrigger(props, children)
+}
+
+pub fn tooltipContent(props: any, children: any) -> VNode {
+  render.tooltipContent(props, children)
+}
+
+pub fn toastRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
+  render.toastRoot(open, renderChildren)
+}
+
+pub fn toastPortal(children: any) -> VNode {
+  render.toastPortal(children)
+}
+
+pub fn toastContent(props: any, children: any) -> VNode {
+  render.toastContent(props, children)
+}
+
+pub fn toastTitle(props: any, children: any) -> VNode {
+  render.toastTitle(props, children)
+}
+
+pub fn toastDescription(props: any, children: any) -> VNode {
+  render.toastDescription(props, children)
+}
+
+pub fn toastClose(props: any, children: any) -> VNode {
+  render.toastClose(props, children)
+}
+
 pub fn menuRoot(open: Signal<bool>, renderChildren: fn() -> any) -> VNode {
   render.menuRoot(open, renderChildren)
 }
@@ -180,6 +220,98 @@ pub fn menuItem(value: string, props: any, children: any) -> VNode {
   render.menuItem(value, props, children)
 }
 
+pub fn selectRoot(open: Signal<bool>, value: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.selectRoot(open, value, renderChildren)
+}
+
+pub fn selectPortal(children: any) -> VNode {
+  render.selectPortal(children)
+}
+
+pub fn selectTrigger(props: any, children: any) -> VNode {
+  render.selectTrigger(props, children)
+}
+
+pub fn selectContent(props: any, children: any) -> VNode {
+  render.selectContent(props, children)
+}
+
+pub fn selectItem(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.selectItem(value, props, renderChildren)
+}
+
+pub fn selectIndicator(props: any, children: any) -> VNode {
+  render.selectIndicator(props, children)
+}
+
+pub fn comboboxRoot(open: Signal<bool>, value: Signal<string>, query: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.comboboxRoot(open, value, query, renderChildren)
+}
+
+pub fn comboboxPortal(children: any) -> VNode {
+  render.comboboxPortal(children)
+}
+
+pub fn comboboxInput(props: any, children: any) -> VNode {
+  render.comboboxInput(props, children)
+}
+
+pub fn comboboxContent(props: any, children: any) -> VNode {
+  render.comboboxContent(props, children)
+}
+
+pub fn comboboxItem(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.comboboxItem(value, props, renderChildren)
+}
+
+pub fn comboboxIndicator(props: any, children: any) -> VNode {
+  render.comboboxIndicator(props, children)
+}
+
+pub fn multiselectRoot(open: Signal<bool>, values: Signal<any>, renderChildren: fn() -> any) -> VNode {
+  render.multiselectRoot(open, values, renderChildren)
+}
+
+pub fn multiselectPortal(children: any) -> VNode {
+  render.multiselectPortal(children)
+}
+
+pub fn multiselectTrigger(props: any, children: any) -> VNode {
+  render.multiselectTrigger(props, children)
+}
+
+pub fn multiselectContent(props: any, children: any) -> VNode {
+  render.multiselectContent(props, children)
+}
+
+pub fn multiselectItem(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.multiselectItem(value, props, renderChildren)
+}
+
+pub fn multiselectIndicator(props: any, children: any) -> VNode {
+  render.multiselectIndicator(props, children)
+}
+
+pub fn checkboxRoot(checked: Signal<bool>, props: any, renderChildren: fn() -> any) -> VNode {
+  render.checkboxRoot(checked, props, renderChildren)
+}
+
+pub fn checkboxIndicator(props: any, children: any) -> VNode {
+  render.checkboxIndicator(props, children)
+}
+
+pub fn radioGroup(value: Signal<string>, props: any, renderChildren: fn() -> any) -> VNode {
+  render.radioGroup(value, props, renderChildren)
+}
+
+pub fn radioItem(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.radioItem(value, props, renderChildren)
+}
+
+pub fn radioIndicator(props: any, children: any) -> VNode {
+  render.radioIndicator(props, children)
+}
+
 pub fn props_id(id: string) -> any {
   render.props_id(id)
 }
@@ -190,6 +322,18 @@ pub fn props_style(style: string) -> any {
 
 pub fn props_value(value: string) -> any {
   render.props_value(value)
+}
+
+pub fn props_checked(checked: bool) -> any {
+  render.props_checked(checked)
+}
+
+pub fn props_type(kind: string) -> any {
+  render.props_type(kind)
+}
+
+pub fn props_name(name: string) -> any {
+  render.props_name(name)
 }
 
 pub fn props_placeholder(placeholder: string) -> any {
@@ -210,6 +354,14 @@ pub fn props_on_input(handler: fn(string) -> void) -> any {
 
 pub fn props_on_change(handler: fn(string) -> void) -> any {
   render.props_on_change(handler)
+}
+
+pub fn props_on_checked_change(handler: fn(bool) -> any) -> any {
+  render.props_on_checked_change(handler)
+}
+
+pub fn props_on_submit(handler: fn() -> any) -> any {
+  render.props_on_submit(handler)
 }
 
 pub fn props_key(key: string) -> any {

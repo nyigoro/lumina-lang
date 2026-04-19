@@ -1,0 +1,92 @@
+import { reactive, render } from "@std";
+
+pub fn bindValue(value: Signal<string>, props: any) -> any {
+  render.props_merge(
+    props,
+    render.props_merge(
+      render.props_value(reactive.get(value)),
+      render.props_on_input(fn(next: string) -> void {
+        let _ = reactive.set(value, next)
+      })
+    )
+  )
+}
+
+pub fn textInput(value: Signal<string>, props: any) -> any {
+  bindValue(value, render.props_merge(props, render.props_type("text")))
+}
+
+pub fn textArea(value: Signal<string>, props: any) -> any {
+  bindValue(value, props)
+}
+
+pub fn bindChecked(value: Signal<bool>, props: any) -> any {
+  render.props_merge(
+    props,
+    render.props_merge(
+      render.props_checked(reactive.get(value)),
+      render.props_on_checked_change(fn(next: bool) -> void {
+        let _ = reactive.set(value, next)
+      })
+    )
+  )
+}
+
+pub fn checkbox(value: Signal<bool>, props: any) -> any {
+  bindChecked(value, render.props_merge(props, render.props_type("checkbox")))
+}
+
+pub fn radio(name: string, selected: Signal<string>, optionValue: string, props: any) -> any {
+  render.props_merge(
+    props,
+    render.props_merge(
+      render.props_type("radio"),
+      render.props_merge(
+        render.props_name(name),
+        render.props_merge(
+            render.props_value(optionValue),
+          render.props_merge(
+            render.props_checked(reactive.get(selected) == optionValue),
+            render.props_on_checked_change(fn(next: bool) -> void {
+              if (next) {
+                let _ = reactive.set(selected, optionValue)
+              }
+            })
+          )
+        )
+      )
+    )
+  )
+}
+
+pub fn submitProps(handler: fn() -> any, props: any) -> any {
+  render.props_merge(props, render.props_on_submit(handler))
+}
+
+pub fn required(value: string, message: string) -> string {
+  if (value == "") {
+    return message
+  } else {
+    return ""
+  }
+}
+
+pub fn minLength(value: string, min: int, message: string) -> string {
+  if (len(value) < min) {
+    return message
+  } else {
+    return ""
+  }
+}
+
+pub fn maxLength(value: string, max: int, message: string) -> string {
+  if (len(value) > max) {
+    return message
+  } else {
+    return ""
+  }
+}
+
+pub fn isValid(error: string) -> bool {
+  return error == ""
+}

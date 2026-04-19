@@ -1,0 +1,25 @@
+import { render } from "@std";
+
+pub fn root(open: Signal<bool>, value: Signal<string>, renderChildren: fn() -> any) -> VNode {
+  render.selectRoot(open, value, renderChildren)
+}
+
+pub fn portal(children: any) -> VNode {
+  render.selectPortal(children)
+}
+
+pub fn trigger(props: any, children: any) -> VNode {
+  render.selectTrigger(props, children)
+}
+
+pub fn content(props: any, children: any) -> VNode {
+  render.selectContent(props, children)
+}
+
+pub fn item(value: string, props: any, renderChildren: fn() -> any) -> VNode {
+  render.selectItem(value, props, renderChildren)
+}
+
+pub fn indicator(props: any, children: any) -> VNode {
+  render.selectIndicator(props, children)
+}

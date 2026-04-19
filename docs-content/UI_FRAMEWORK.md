@@ -24,7 +24,9 @@ Today the repo includes:
 - keyed frame reuse and keyed DOM reconciliation
 - scoped context, slots, children helpers, and prop/event composition
 - portal support for layered DOM UI
-- first headless DOM primitives in `@std/tabs`, `@std/dialog`, `@std/popover`, and `@std/menu`
+- typed shared-state helpers in `@std/store`
+- controlled form helpers and lightweight validation utilities in `@std/forms`
+- headless DOM primitives in `@std/tabs`, `@std/dialog`, `@std/popover`, `@std/tooltip`, `@std/toast`, `@std/menu`, `@std/select`, `@std/combobox`, `@std/multiselect`, `@std/checkbox`, and `@std/radio`
 
 That foundation is now strong enough to support real headless UI authoring, but the broader app/framework layer is still intentionally incomplete.
 
@@ -76,6 +78,7 @@ Its responsibilities are:
 - portals and layered UI
 - focus management
 - form behavior
+- store/context ergonomics for shared app state
 - ARIA and keyboard interaction
 - headless accessibility primitives
 - DOM-specific reconciliation details
@@ -186,7 +189,14 @@ The current shipped baseline is:
 - tabs with keyboard navigation and ARIA wiring
 - dialog with focus trap, restore, title/description wiring, and portals
 - popover with anchored portal positioning and outside-dismiss
+- tooltip with anchored portal positioning plus hover/focus visibility semantics
+- toast with portal delivery, close controls, title/description wiring, and auto-dismiss
 - menu with anchored portal positioning, item navigation, and selection
+- select with anchored listbox positioning, option selection, indicator composition, and keyboard navigation
+- checkbox with signal-backed checked state, ARIA wiring, keyboard toggle, and indicator composition
+- radio group/item/indicator primitives with ARIA wiring, roving focus, and arrow-key navigation
+- forms helpers for controlled values, checked state, submit handling, and lightweight validation
+- store helpers for app-level signals, derived memo slices, and context-backed sharing
 
 The next goal is to widen that baseline while staying visually unopinionated.
 
@@ -234,8 +244,8 @@ Lumina's ideal UI framework should explicitly avoid a few traps:
 
 The practical build order should be:
 
-1. expand the headless primitive set from tabs/dialog/popover/menu to forms, select-like controls, tooltip, toast, and checkbox/radio foundations
-2. strengthen app-level APIs such as forms, shared state, async resources, and error handling
+1. expand the headless primitive set from tabs/dialog/popover/tooltip/toast/menu/select/checkbox/radio to combobox and richer multiselect foundations, while continuing to mature the newly added forms/store layer
+2. strengthen app-level APIs such as async resources, richer validation/state ergonomics, and error handling
 3. continue portability and backend parity work where the framework currently leans JS/DOM-first
 4. add optional syntax sugar only if it clearly improves authoring without hiding the runtime model
 
