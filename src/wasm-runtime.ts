@@ -49,6 +49,12 @@ type WasmEnvFns = {
     arg4: number
   ) => number;
   module_call_ptr: (namespaceHandle: number, calleeHandle: number, argsPtr: number, argCount: number) => number;
+  closure_call0: (closure: number) => number;
+  closure_call1: (closure: number, arg0: number) => number;
+  closure_call2: (closure: number, arg0: number, arg1: number) => number;
+  closure_call3: (closure: number, arg0: number, arg1: number, arg2: number) => number;
+  closure_call4: (closure: number, arg0: number, arg1: number, arg2: number, arg3: number) => number;
+  closure_call5: (closure: number, arg0: number, arg1: number, arg2: number, arg3: number, arg4: number) => number;
   mem_retain: (ptr: number) => void;
   mem_release: (ptr: number) => void;
   mem_stats_live: () => number;
@@ -277,7 +283,7 @@ const readI32FromMemory = (ptr: number): number => {
   return view.getInt32(start, true);
 };
 
-const invokeClosure1 = (closureHandle: number, arg: number): number => {
+const invokeClosure = (closureHandle: number, args: number[]): number => {
   const instance = activeWasmInstance;
   if (!instance) return 0;
   const handle = Math.trunc(closureHandle);
@@ -290,23 +296,15 @@ const invokeClosure1 = (closureHandle: number, arg: number): number => {
   for (let i = 0; i < captureCount; i += 1) {
     captureArgs.push(readI32FromMemory(handle + 8 + i * 8));
   }
-  return normalizeI32(fn(...captureArgs, normalizeI32(arg)));
+  return normalizeI32(fn(...captureArgs, ...args.map(normalizeI32)));
+};
+
+const invokeClosure1 = (closureHandle: number, arg: number): number => {
+  return invokeClosure(closureHandle, [arg]);
 };
 
 const invokeClosure2 = (closureHandle: number, argA: number, argB: number): number => {
-  const instance = activeWasmInstance;
-  if (!instance) return 0;
-  const handle = Math.trunc(closureHandle);
-  const lambdaId = readI32FromMemory(handle);
-  if (lambdaId <= 0) return 0;
-  const captureCount = Math.max(0, readI32FromMemory(handle + 4));
-  const fn = (instance.exports[`__lambda_${lambdaId}`] as ((...params: number[]) => number) | undefined);
-  if (!fn) return 0;
-  const captureArgs: number[] = [];
-  for (let i = 0; i < captureCount; i += 1) {
-    captureArgs.push(readI32FromMemory(handle + 8 + i * 8));
-  }
-  return normalizeI32(fn(...captureArgs, normalizeI32(argA), normalizeI32(argB)));
+  return invokeClosure(closureHandle, [argA, argB]);
 };
 
 const normalizeI32 = (value: unknown): number => {
@@ -580,6 +578,14 @@ const defaultEnv: WasmEnvFns = {
     }
     return callModuleFunction(namespaceHandle, calleeHandle, args);
   },
+  closure_call0: (closure: number) => invokeClosure(closure, []),
+  closure_call1: (closure: number, arg0: number) => invokeClosure(closure, [arg0]),
+  closure_call2: (closure: number, arg0: number, arg1: number) => invokeClosure(closure, [arg0, arg1]),
+  closure_call3: (closure: number, arg0: number, arg1: number, arg2: number) => invokeClosure(closure, [arg0, arg1, arg2]),
+  closure_call4: (closure: number, arg0: number, arg1: number, arg2: number, arg3: number) =>
+    invokeClosure(closure, [arg0, arg1, arg2, arg3]),
+  closure_call5: (closure: number, arg0: number, arg1: number, arg2: number, arg3: number, arg4: number) =>
+    invokeClosure(closure, [arg0, arg1, arg2, arg3, arg4]),
   mem_retain: (ptr: number) => {
     retainManagedPtr(ptr);
   },

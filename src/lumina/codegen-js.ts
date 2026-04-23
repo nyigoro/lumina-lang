@@ -134,6 +134,22 @@ class JSGenerator {
       this.builder.append('\n');
       this.builder.append('const math = { abs: (value) => Math.abs(value), min: (a, b) => Math.min(a, b), max: (a, b) => Math.max(a, b), absf: (value) => Math.abs(value), minf: (a, b) => Math.min(a, b), maxf: (a, b) => Math.max(a, b), sqrt: (value) => Math.sqrt(value), pow: (base, exp) => Math.pow(base, exp), powf: (base, exp) => Math.pow(base, exp), floor: (value) => Math.floor(value), ceil: (value) => Math.ceil(value), round: (value) => Math.round(value), pi: Math.PI, e: Math.E };');
       this.builder.append('\n');
+      this.builder.append('const __luminaNone = { $tag: "None" };');
+      this.builder.append('\n');
+      this.builder.append('const __luminaSome = (value) => ({ $tag: "Some", $payload: value });');
+      this.builder.append('\n');
+      this.builder.append('const __luminaCount = (value) => Math.max(0, Math.trunc(Number(value)));');
+      this.builder.append('\n');
+      this.builder.append('const __luminaHashKey = (value) => { if (typeof value === "string") return `s:${value}`; if (typeof value === "number") return `n:${value}`; if (typeof value === "boolean") return `b:${value}`; if (typeof value === "bigint") return `i:${value.toString()}`; if (value == null) return String(value); return `j:${JSON.stringify(value)}`; };');
+      this.builder.append('\n');
+      this.builder.append('const vec = { new: () => [], from: (items) => Array.from(items ?? []), push: (v, value) => { v.push(value); }, get: (v, index) => { const idx = Math.trunc(Number(index)); return idx >= 0 && idx < v.length ? __luminaSome(v[idx]) : __luminaNone; }, len: (v) => v.length, pop: (v) => v.length > 0 ? __luminaSome(v.pop()) : __luminaNone, clear: (v) => { v.length = 0; }, map: (v, f) => v.map((value) => f(value)), filter: (v, pred) => v.filter((value) => pred(value)), fold: (v, init, f) => v.reduce((acc, value) => f(acc, value), init), for_each: (v, f) => { for (const value of v) f(value); }, any: (v, pred) => v.some((value) => pred(value)), all: (v, pred) => v.every((value) => pred(value)), find: (v, pred) => { const found = v.find((value) => pred(value)); return found === undefined ? __luminaNone : __luminaSome(found); }, position: (v, pred) => { const idx = v.findIndex((value) => pred(value)); return idx === -1 ? __luminaNone : __luminaSome(idx); }, take: (v, n) => v.slice(0, __luminaCount(n)), skip: (v, n) => v.slice(__luminaCount(n)), zip: (v, other) => v.slice(0, Math.min(v.length, other.length)).map((value, idx) => [value, other[idx]]), enumerate: (v) => v.map((value, idx) => [idx, value]) };');
+      this.builder.append('\n');
+      this.builder.append('const list = vec;');
+      this.builder.append('\n');
+      this.builder.append('const hashmap = { new: () => new Map(), insert: (m, k, v) => { const key = __luminaHashKey(k); const prev = m.get(key); m.set(key, { key: k, value: v }); return prev ? __luminaSome(prev.value) : __luminaNone; }, get: (m, k) => { const entry = m.get(__luminaHashKey(k)); return entry ? __luminaSome(entry.value) : __luminaNone; }, remove: (m, k) => { const key = __luminaHashKey(k); const entry = m.get(key); if (!entry) return __luminaNone; m.delete(key); return __luminaSome(entry.value); }, contains_key: (m, k) => m.has(__luminaHashKey(k)), len: (m) => m.size, clear: (m) => m.clear(), keys: (m) => Array.from(m.values(), (entry) => entry.key), values: (m) => Array.from(m.values(), (entry) => entry.value) };');
+      this.builder.append('\n');
+      this.builder.append('const hashset = { new: () => new Map(), insert: (s, v) => { const key = __luminaHashKey(v); const had = s.has(key); s.set(key, v); return !had; }, contains: (s, v) => s.has(__luminaHashKey(v)), remove: (s, v) => s.delete(__luminaHashKey(v)), len: (s) => s.size, clear: (s) => s.clear(), values: (s) => Array.from(s.values()) };');
+      this.builder.append('\n');
       this.builder.append('const fs = { readFile: async () => ({ $tag: "Err", $payload: "No fs runtime" }), writeFile: async () => ({ $tag: "Err", $payload: "No fs runtime" }) };');
       this.builder.append('\n');
       this.builder.append('const opfs = { is_available: () => false, readFile: async () => ({ $tag: "Err", $payload: "No opfs runtime" }), writeFile: async () => ({ $tag: "Err", $payload: "No opfs runtime" }), readDir: async () => ({ $tag: "Err", $payload: "No opfs runtime" }), metadata: async () => ({ $tag: "Err", $payload: "No opfs runtime" }), exists: async () => false, mkdir: async () => ({ $tag: "Err", $payload: "No opfs runtime" }), removeFile: async () => ({ $tag: "Err", $payload: "No opfs runtime" }) };');
@@ -207,7 +223,7 @@ class JSGenerator {
       this.builder.append('function __lumina_range(start, end, inclusive, hasStart, hasEnd) { return { start: hasStart ? Number(start) : null, end: hasEnd ? Number(end) : null, inclusive: !!inclusive }; }');
       this.builder.append('\n');
       this.builder.append(
-        'function __lumina_slice(str, start, end, inclusive) { const actualStart = start ?? 0; const actualEnd = end ?? str.length; const finalEnd = inclusive ? actualEnd + 1 : actualEnd; if (actualStart < 0 || actualStart > str.length) { throw new Error(`String slice start index ${actualStart} out of bounds`); } if (finalEnd < 0 || finalEnd > str.length) { throw new Error(`String slice end index ${finalEnd} out of bounds`); } return str.substring(actualStart, finalEnd); }'
+        'function __lumina_slice(target, start, end, inclusive) { const length = target?.length ?? 0; const actualStart = start ?? 0; const actualEnd = end ?? length; const finalEnd = inclusive ? actualEnd + 1 : actualEnd; if (actualStart < 0 || actualStart > length) { throw new Error(`Slice start index ${actualStart} out of bounds`); } if (finalEnd < 0 || finalEnd > length) { throw new Error(`Slice end index ${finalEnd} out of bounds`); } if (typeof target === "string") { return target.substring(actualStart, finalEnd); } if (Array.isArray(target)) { return target.slice(actualStart, finalEnd); } return undefined; }'
       );
       this.builder.append('\n');
       this.builder.append('function __lumina_fixed_array(size, initializer) { const arr = new Array(Math.max(0, Math.trunc(size))); if (typeof initializer === "function") { for (let i = 0; i < arr.length; i++) arr[i] = initializer(i); } return arr; }');
@@ -252,9 +268,9 @@ class JSGenerator {
       }
     } else {
       if (this.target === 'cjs') {
-        this.builder.append('module.exports = { io, str, math, fs, opfs, url, web_storage, dom, web_worker, web_streams, path, env, process, json, http, time, join_all, timeout, async_channel, sab_channel, webgpu, regex, crypto, functor, applicative, monad, foldable, traversable, iter, map_vec, filter_vec, filter_option, zip_vec, enumerate_vec, flatten_vec, flat_map_vec, chunk_vec, window_vec, partition_vec, take_vec, skip_vec, any_vec, all_vec, find_vec, count_vec, sum_vec, sum_vec_f64, unique_vec, reverse_vec, sort_vec, sort_by_vec, sort_by_desc_vec, group_by_vec, intersperse_vec, join_vec, query, where_q, select_q, order_by_q, order_by_desc_q, limit_q, offset_q, group_by_q, count_q, first_q, to_vec_q, join_q, __set, __lumina_stringify, __lumina_range, __lumina_slice, __lumina_index, __lumina_fixed_array, __lumina_array_bounds_check, __lumina_array_literal, __lumina_clone, __lumina_debug, __lumina_eq, __lumina_struct, __lumina_register_trait_impl };');
+        this.builder.append('module.exports = { io, str, math, list, vec, hashmap, hashset, fs, opfs, url, web_storage, dom, web_worker, web_streams, path, env, process, json, http, time, join_all, timeout, async_channel, sab_channel, webgpu, regex, crypto, functor, applicative, monad, foldable, traversable, iter, map_vec, filter_vec, filter_option, zip_vec, enumerate_vec, flatten_vec, flat_map_vec, chunk_vec, window_vec, partition_vec, take_vec, skip_vec, any_vec, all_vec, find_vec, count_vec, sum_vec, sum_vec_f64, unique_vec, reverse_vec, sort_vec, sort_by_vec, sort_by_desc_vec, group_by_vec, intersperse_vec, join_vec, query, where_q, select_q, order_by_q, order_by_desc_q, limit_q, offset_q, group_by_q, count_q, first_q, to_vec_q, join_q, __set, __lumina_stringify, __lumina_range, __lumina_slice, __lumina_index, __lumina_fixed_array, __lumina_array_bounds_check, __lumina_array_literal, __lumina_clone, __lumina_debug, __lumina_eq, __lumina_struct, __lumina_register_trait_impl };');
       } else {
-        this.builder.append('export { io, str, math, fs, opfs, url, web_storage, dom, web_worker, web_streams, path, env, process, json, http, time, join_all, timeout, async_channel, sab_channel, webgpu, regex, crypto, functor, applicative, monad, foldable, traversable, iter, map_vec, filter_vec, filter_option, zip_vec, enumerate_vec, flatten_vec, flat_map_vec, chunk_vec, window_vec, partition_vec, take_vec, skip_vec, any_vec, all_vec, find_vec, count_vec, sum_vec, sum_vec_f64, unique_vec, reverse_vec, sort_vec, sort_by_vec, sort_by_desc_vec, group_by_vec, intersperse_vec, join_vec, query, where_q, select_q, order_by_q, order_by_desc_q, limit_q, offset_q, group_by_q, count_q, first_q, to_vec_q, join_q, __set, __lumina_stringify, __lumina_range, __lumina_slice, __lumina_index, __lumina_fixed_array, __lumina_array_bounds_check, __lumina_array_literal, __lumina_clone, __lumina_debug, __lumina_eq, __lumina_struct, __lumina_register_trait_impl };');
+        this.builder.append('export { io, str, math, list, vec, hashmap, hashset, fs, opfs, url, web_storage, dom, web_worker, web_streams, path, env, process, json, http, time, join_all, timeout, async_channel, sab_channel, webgpu, regex, crypto, functor, applicative, monad, foldable, traversable, iter, map_vec, filter_vec, filter_option, zip_vec, enumerate_vec, flatten_vec, flat_map_vec, chunk_vec, window_vec, partition_vec, take_vec, skip_vec, any_vec, all_vec, find_vec, count_vec, sum_vec, sum_vec_f64, unique_vec, reverse_vec, sort_vec, sort_by_vec, sort_by_desc_vec, group_by_vec, intersperse_vec, join_vec, query, where_q, select_q, order_by_q, order_by_desc_q, limit_q, offset_q, group_by_q, count_q, first_q, to_vec_q, join_q, __set, __lumina_stringify, __lumina_range, __lumina_slice, __lumina_index, __lumina_fixed_array, __lumina_array_bounds_check, __lumina_array_literal, __lumina_clone, __lumina_debug, __lumina_eq, __lumina_struct, __lumina_register_trait_impl };');
       }
     }
     this.builder.append('\n');
@@ -1352,7 +1368,18 @@ class JSGenerator {
         return withBase(concat('(', this.emitExpr(expr.left), ` ${expr.op} `, this.emitExpr(expr.right), ')'));
       case 'Call': {
         const argValues = expr.args.map((arg) => arg.value);
-        if (!expr.receiver && !expr.enumName && expr.callee.name === 'cast' && (expr.typeArgs?.length ?? 0) === 1 && argValues.length === 1) {
+        const directCalleeName = expr.callee.type === 'Identifier' ? expr.callee.name : null;
+        const calleeName = directCalleeName ?? expr.callee.name ?? '__computed__';
+        if (!expr.receiver && !expr.enumName && !directCalleeName) {
+          const parts: Array<string | EmitResult> = ['(', this.emitExpr(expr.callee), ')('];
+          argValues.forEach((arg, idx) => {
+            if (idx > 0) parts.push(', ');
+            parts.push(this.emitExpr(arg));
+          });
+          parts.push(')');
+          return withBase(concat(...parts));
+        }
+        if (!expr.receiver && !expr.enumName && calleeName === 'cast' && (expr.typeArgs?.length ?? 0) === 1 && argValues.length === 1) {
           const targetArg = expr.typeArgs?.[0];
           const targetType = normalizeNumericTypeName(
             typeof targetArg === 'string' ? targetArg : 'any'
@@ -1388,7 +1415,7 @@ class JSGenerator {
           const mangledName = mangleTraitMethodName(
             this.defaultMethodContext.traitType,
             this.defaultMethodContext.forType,
-            expr.callee.name
+            calleeName
           );
           const parts: Array<string | EmitResult> = [`${mangledName}(`, this.emitExpr({ type: 'Identifier', name: expr.enumName })];
           argValues.forEach((arg) => {
@@ -1399,7 +1426,7 @@ class JSGenerator {
           return withBase(concat(...parts));
         }
         if (expr.enumName && isUpperIdent(expr.enumName)) {
-          return this.emitEnumConstruct(expr.enumName, expr.callee.name, argValues, baseLoc);
+          return this.emitEnumConstruct(expr.enumName, calleeName, argValues, baseLoc);
         }
         const helperReceiverExpr =
           expr.receiver ||
@@ -1409,7 +1436,7 @@ class JSGenerator {
 
         if (helperReceiverExpr && argValues.length === 0) {
           const receiverExpr = this.emitExpr(helperReceiverExpr);
-          switch (expr.callee.name) {
+          switch (calleeName) {
             case 'millis':
             case 'milliseconds':
               return withBase(concat('Math.trunc(', receiverExpr, ')'));
@@ -1424,7 +1451,7 @@ class JSGenerator {
           }
         }
         if (expr.receiver) {
-          const parts: Array<string | EmitResult> = [this.emitExpr(expr.receiver), '.', expr.callee.name, '('];
+          const parts: Array<string | EmitResult> = [this.emitExpr(expr.receiver), '.', calleeName, '('];
           argValues.forEach((arg, idx) => {
             if (idx > 0) parts.push(', ');
             parts.push(this.emitExpr(arg));
@@ -1432,8 +1459,8 @@ class JSGenerator {
           parts.push(')');
           return withBase(concat(...parts));
         }
-        const calleeName = expr.enumName ? `${expr.enumName}.${expr.callee.name}` : expr.callee.name;
-        const parts: Array<string | EmitResult> = [`${calleeName}(`];
+        const finalCalleeName = expr.enumName ? `${expr.enumName}.${calleeName}` : calleeName;
+        const parts: Array<string | EmitResult> = [`${finalCalleeName}(`];
         argValues.forEach((arg, idx) => {
           if (idx > 0) parts.push(', ');
           parts.push(this.emitExpr(arg));
@@ -1774,7 +1801,11 @@ const exprUsesTry = (expr: LuminaExpr): boolean => {
     case 'Binary':
       return exprUsesTry(expr.left) || exprUsesTry(expr.right);
     case 'Call':
-      return expr.args.some((arg) => exprUsesTry(arg.value)) || (expr.receiver ? exprUsesTry(expr.receiver) : false);
+      return (
+        expr.args.some((arg) => exprUsesTry(arg.value)) ||
+        (expr.receiver ? exprUsesTry(expr.receiver) : false) ||
+        (expr.callee.type !== 'Identifier' ? exprUsesTry(expr.callee) : false)
+      );
     case 'Member':
       return exprUsesTry(expr.object);
     case 'StructLiteral':

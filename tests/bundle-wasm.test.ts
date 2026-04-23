@@ -33,11 +33,9 @@ describe('lumina bundle --target wasm', () => {
       useRecovery: false,
       deps: {
         compileTask: async (payload) => {
-          const watPath = payload.outPath;
-          const producedWasm = watPath.replace(/\.wat$/i, '.wasm');
-          fs.mkdirSync(path.dirname(watPath), { recursive: true });
-          fs.writeFileSync(watPath, '(module)', 'utf-8');
-          fs.writeFileSync(producedWasm, Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+          expect(payload.semanticTarget).toBe('wasm-web');
+          fs.mkdirSync(path.dirname(payload.outPath), { recursive: true });
+          fs.writeFileSync(payload.outPath, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
           return { ok: true };
         },
       },
@@ -48,5 +46,36 @@ describe('lumina bundle --target wasm', () => {
     const loader = fs.readFileSync(loaderOut, 'utf-8');
     expect(loader).toContain('instantiateStreaming');
     expect(loader).toContain('export async function load');
+  });
+
+  it('passes through --emit-wat for companion debug output', async () => {
+    const dir = tmpDir();
+    const entry = path.join(dir, 'src', 'main.lm');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, 'fn main() -> i32 { 1 }\n', 'utf-8');
+
+    const wasmOut = path.join(dir, 'dist', 'index.wasm');
+    const watOut = path.join(dir, 'dist', 'index.wat');
+
+    await runLuminaBundle([entry, '--target', 'wasm', '--out', wasmOut, '--emit-wat'], {
+      cwd: dir,
+      grammarPath: path.join(dir, 'dummy.peg'),
+      useRecovery: false,
+      deps: {
+        compileTask: async (payload) => {
+          expect(payload.semanticTarget).toBe('wasm-web');
+          fs.mkdirSync(path.dirname(payload.outPath), { recursive: true });
+          fs.writeFileSync(payload.outPath, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+          if (payload.emitWat) {
+            fs.writeFileSync(watOut, '(module)', 'utf-8');
+          }
+          return { ok: true };
+        },
+      },
+      stdout: { log: () => {} },
+    });
+
+    expect(fs.existsSync(wasmOut)).toBe(true);
+    expect(fs.existsSync(watOut)).toBe(true);
   });
 });

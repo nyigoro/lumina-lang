@@ -245,19 +245,6 @@ const EXPLANATIONS: Record<string, DiagnosticExplanation> = {
       'Refactor deeply nested/destructuring pattern logic into explicit steps.',
     ],
   },
-  'WASM-IS-001': {
-    code: 'WASM-IS-001',
-    title: '`is` narrowing is not supported in the WASM target',
-    summary: 'The `is` operator performs runtime type narrowing, which the WASM backend cannot lower. Use `match` instead.',
-    why: 'The WASM backend lowers enum checks to explicit pattern matches. It does not preserve the runtime information needed for `is` narrowing, so `match` is the supported form.',
-    howToFix: [
-      'Replace `x is Foo` with a match expression.',
-      'Before: if x is Foo { ... }',
-      'After:  match x { Foo(_) => { ... }, _ => {} }',
-      'For boolean checks: match x { Foo(_) => true, _ => false }',
-      'If you need `is` narrowing, compile with the JS or ESM target instead of WASM.',
-    ],
-  },
   'COMP-001': {
     code: 'COMP-001',
     title: 'Comprehension source must be a Vec',

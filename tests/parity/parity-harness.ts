@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { compileGrammar } from '../../src/grammar/index.js';
 import { generateJSFromAst } from '../../src/lumina/codegen-js.js';
 import { generateWATFromAst } from '../../src/lumina/codegen-wasm.js';
+import { analyzeLumina } from '../../src/lumina/semantic.js';
 import { awaitWASMPromiseHandle, callWASMFunction, loadWASM } from '../../src/wasm-runtime.js';
 import type { Diagnostic } from '../../src/parser/index.js';
 import type { LuminaProgram } from '../../src/lumina/ast.js';
@@ -36,7 +37,51 @@ const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
 const parser = compileGrammar(luminaGrammar, { cache: true });
 const tmpDir = path.join(os.tmpdir(), 'lumina-parity');
 
-const parseProgram = (source: string): LuminaProgram => parser.parse(source.trim() + '\n') as LuminaProgram;
+const collectParseDiagnostics = (node: unknown): Diagnostic[] => {
+  const diagnostics: Diagnostic[] = [];
+  const seen = new Set<unknown>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if ('type' in value && (value as { type?: string }).type === 'ErrorNode') {
+      const errorNode = value as {
+        message?: string;
+        location?: Diagnostic['location'];
+        expected?: string[];
+      };
+      const expected =
+        errorNode.expected && errorNode.expected.length > 0
+          ? ` Expected: ${errorNode.expected.join(', ')}`
+          : '';
+      diagnostics.push({
+        severity: 'error',
+        message: `${errorNode.message ?? 'Invalid syntax'}${expected}`,
+        location:
+          errorNode.location ?? {
+            start: { line: 1, column: 1, offset: 0 },
+            end: { line: 1, column: 1, offset: 0 },
+          },
+        code: 'PARSE_ERROR',
+        source: 'parsergen',
+      });
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const child of Object.values(value)) {
+      visit(child);
+    }
+  };
+  visit(node);
+  return diagnostics;
+};
+
+const parseProgram = (source: string): LuminaProgram => {
+  const ast = parser.parse(source.trim() + '\n') as LuminaProgram;
+  assertNoHardErrors(collectParseDiagnostics(ast), 'Parse');
+  return ast;
+};
 
 const normalizeOutput = (value: string): string => value.replace(/\r\n/g, '\n').trimEnd();
 
@@ -70,11 +115,23 @@ export const isWat2WasmAvailable = (): boolean => WAT2WASM_AVAILABLE;
 
 export const supportsParityWasm = (): boolean => isWat2WasmAvailable();
 
+export const analyzeForTarget = (source: string, target: 'cjs' | 'esm' | 'wasm'): Diagnostic[] => {
+  const ast = parseProgram(source);
+  return analyzeLumina(ast, { target }).diagnostics;
+};
+
+export const generateWasmDiagnostics = (source: string): Diagnostic[] => {
+  const ast = parseProgram(source);
+  return generateWATFromAst(ast, { exportMain: true }).diagnostics;
+};
+
 export async function runJS(source: string): Promise<ParityRunOutput> {
   const ast = parseProgram(source);
+  const analysis = analyzeLumina(ast, { target: 'cjs' });
   const { code } = generateJSFromAst(ast, {
     target: 'cjs',
     includeRuntime: false,
+    traitMethodResolutions: analysis.traitMethodResolutions,
   });
 
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });

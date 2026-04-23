@@ -77,24 +77,6 @@ function getTextInRange(text: string, range: Range): string {
   return chunks.join('\n');
 }
 
-function buildIsToMatchAction(text: string, uri: string, range: Range): CodeAction | null {
-  const snippet = getTextInRange(text, range).trim();
-  const match = /^(?<value>[\s\S]+?)\s+is\s+(?<variant>(?:[A-Za-z_][\w]*\.)?[A-Za-z_][\w]*)$/.exec(snippet);
-  if (!match?.groups) return null;
-  const value = match.groups.value.trim();
-  const variant = match.groups.variant.trim();
-  if (!value || !variant) return null;
-  return {
-    title: 'Rewrite as match expression',
-    kind: CodeActionKind.QuickFix,
-    edit: {
-      changes: {
-        [uri]: [TextEdit.replace(range, `match ${value} { ${variant}(_) => true, _ => false }`)],
-      },
-    },
-  };
-}
-
 export function getCodeActionsForDiagnostics(
   text: string,
   uri: string,
@@ -127,14 +109,6 @@ export function getCodeActionsForDiagnostics(
           },
         },
       });
-    }
-
-    if (diagCode === 'WASM-IS-001') {
-      const rewrite = buildIsToMatchAction(text, uri, diag.range);
-      if (rewrite) {
-        rewrite.diagnostics = [diag];
-        actions.push(rewrite);
-      }
     }
 
     if (diagCode === 'REF_LVALUE_REQUIRED') {

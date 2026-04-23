@@ -14,6 +14,23 @@ import {
 import { inferProgram } from './hm-infer.js';
 import { prune, type Type, type ConstExpr as TypeConstExpr, normalizePrimitiveName, HKT_APPLY_TYPE_NAME } from './types.js';
 import { desugarListComprehensions } from './comprehension.js';
+import { emitWAT } from './wasm-emit-wat.js';
+import {
+  createEmptyWasmTextModule,
+  type WasmFunctionImport,
+  type WasmNamedValue,
+  type WasmTextInstruction,
+  type WasmTextFunction,
+  type WasmTextModule,
+  type WasmValType,
+  wasmBlock,
+  wasmFuncImport,
+  wasmIf,
+  wasmLoop,
+  wasmOp,
+  wasmRaw,
+  wasmTextFunction,
+} from './wasm-module.js';
 
 const normalizeTargetTypeName = (name: string): string => {
   if (name === 'int') return 'i32';
@@ -63,10 +80,11 @@ const alignTo = (value: number, alignment: number): number => {
   return remainder === 0 ? value : value + (alignment - remainder);
 };
 
-type WasmValType = 'i32' | 'i64' | 'f64';
-
 export interface WasmCodegenOptions {
   exportMain?: boolean;
+  targetProfile?: 'wasm' | 'wasm-web' | 'wasm-standalone';
+  sourceFile?: string;
+  emitDebugMetadata?: boolean;
 }
 
 export interface WasmCodegenResult {
@@ -145,13 +163,700 @@ const resolveTypeExprName = (typeExpr: LuminaTypeExpr): string => {
   return 'unknown';
 };
 
-export function generateWATFromAst(
+const extractResultTypes = (header: string): WasmValType[] => {
+  const results: WasmValType[] = [];
+  const pattern = /\(result\s+([^)]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(header)) !== null) {
+    const value = match[1].trim();
+    if (value === 'i32' || value === 'i64' || value === 'f64') {
+      results.push(value);
+    }
+  }
+  return results;
+};
+
+const parseOpInstruction = (line: string): WasmTextInstruction => {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return wasmRaw(trimmed);
+  if (trimmed.startsWith(';;')) return wasmRaw(trimmed);
+  if (trimmed.includes('(') || trimmed.includes(')')) return wasmRaw(trimmed);
+  const parts = trimmed.split(/\s+/).filter((part) => part.length > 0);
+  if (parts.length === 0) return wasmRaw(trimmed);
+  const [op, ...rest] = parts;
+  const immediates = rest.map((part) => (/^-?\d+(?:\.\d+)?$/.test(part) ? Number(part) : part));
+  return wasmOp(op, ...immediates);
+};
+
+const liftTextInstructions = (lines: string[]): WasmTextInstruction[] => {
+  const normalized = lines.map((line) => line.replace(/\r$/, '')).filter((line) => line.trim().length > 0);
+  let index = 0;
+
+  const parseSequence = (stopTokens: Set<string>): WasmTextInstruction[] => {
+    const instructions: WasmTextInstruction[] = [];
+    while (index < normalized.length) {
+      const trimmed = normalized[index].trim();
+      if (stopTokens.has(trimmed)) break;
+      index += 1;
+      if (trimmed.startsWith('(block')) {
+        const match = trimmed.match(/^\(block(?:\s+([^\s()]+))?/);
+        const body = parseSequence(new Set([')']));
+        if (normalized[index]?.trim() === ')') index += 1;
+        instructions.push(wasmBlock(body, { label: match?.[1], results: extractResultTypes(trimmed) }));
+        continue;
+      }
+      if (trimmed.startsWith('(loop')) {
+        const match = trimmed.match(/^\(loop(?:\s+([^\s()]+))?/);
+        const body = parseSequence(new Set([')']));
+        if (normalized[index]?.trim() === ')') index += 1;
+        instructions.push(wasmLoop(body, { label: match?.[1], results: extractResultTypes(trimmed) }));
+        continue;
+      }
+      if (trimmed === 'if' || trimmed.startsWith('if ') || trimmed === '(if' || trimmed.startsWith('(if ')) {
+        const results = extractResultTypes(trimmed);
+        const parenthesized = trimmed.startsWith('(if');
+        let thenBody: WasmTextInstruction[] = [];
+        let elseBody: WasmTextInstruction[] = [];
+        if (parenthesized) {
+          if (normalized[index]?.trim() === '(then') {
+            index += 1;
+            thenBody = parseSequence(new Set([')']));
+            if (normalized[index]?.trim() === ')') index += 1;
+          } else {
+            thenBody = parseSequence(new Set(['(else', ')']));
+          }
+          if (normalized[index]?.trim() === '(else') {
+            index += 1;
+            elseBody = parseSequence(new Set([')']));
+            if (normalized[index]?.trim() === ')') index += 1;
+          }
+          if (normalized[index]?.trim() === ')') index += 1;
+        } else {
+          thenBody = parseSequence(new Set(['else', 'end']));
+          if (normalized[index]?.trim() === 'else') {
+            index += 1;
+            elseBody = parseSequence(new Set(['end']));
+          }
+          if (normalized[index]?.trim() === 'end') index += 1;
+        }
+        instructions.push(wasmIf(thenBody, elseBody, results));
+        continue;
+      }
+      instructions.push(parseOpInstruction(trimmed));
+    }
+    return instructions;
+  };
+
+  return parseSequence(new Set());
+};
+
+const rawInstructions = (lines: string[]): WasmTextInstruction[] => liftTextInstructions(lines);
+
+const stripDollar = (value: string): string => value.replace(/^\$/, '');
+
+const collectCalledFunctionNames = (instructions: WasmTextInstruction[]): Set<string> => {
+  const names = new Set<string>();
+  const visit = (items: WasmTextInstruction[]) => {
+    for (const instruction of items) {
+      if (instruction.kind === 'op' && instruction.op === 'call' && instruction.immediates?.length) {
+        names.add(stripDollar(String(instruction.immediates[0])));
+        continue;
+      }
+      if (instruction.kind === 'if') {
+        visit(instruction.thenBody);
+        visit(instruction.elseBody ?? []);
+        continue;
+      }
+      if (instruction.kind === 'block' || instruction.kind === 'loop') {
+        visit(instruction.body);
+      }
+    }
+  };
+  visit(instructions);
+  return names;
+};
+
+const collectUsedImports = (functions: WasmTextFunction[], availableImports: WasmFunctionImport[]): WasmFunctionImport[] => {
+  const usedCalls = new Set<string>();
+  for (const fn of functions) {
+    for (const name of collectCalledFunctionNames(fn.body)) {
+      usedCalls.add(name);
+    }
+  }
+  return availableImports.filter((spec) => usedCalls.has(stripDollar(spec.as)));
+};
+
+const parseExportedFunctionNames = (exports: string[]): string[] => {
+  const names: string[] = [];
+  for (const snippet of exports) {
+    for (const line of snippet.split(/\r?\n/)) {
+      const match = line.trim().match(/^\(export "([^"]+)" \(func \$([^)]+)\)\)$/);
+      if (match) names.push(match[1]);
+    }
+  }
+  return names;
+};
+
+const WASM_HOST_IMPORTS: WasmFunctionImport[] = [
+  wasmFuncImport('env', 'print_int', '$print_int', ['i32']),
+  wasmFuncImport('env', 'print_float', '$print_float', ['f64']),
+  wasmFuncImport('env', 'print_bool', '$print_bool', ['i32']),
+  wasmFuncImport('env', 'print_string', '$print_string', ['i32']),
+  wasmFuncImport('env', 'print_i64', '$print_i64', ['i64']),
+  wasmFuncImport('env', 'str_new', '$str_new', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'str_concat', '$str_concat', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'str_len', '$str_len', ['i32'], ['i32']),
+  wasmFuncImport('env', 'str_slice', '$str_slice', ['i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'str_eq', '$str_eq', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'str_from_int', '$str_from_int', ['i32'], ['i32']),
+  wasmFuncImport('env', 'str_from_i64', '$str_from_i64', ['i64'], ['i32']),
+  wasmFuncImport('env', 'str_from_u64', '$str_from_u64', ['i64'], ['i32']),
+  wasmFuncImport('env', 'str_from_float', '$str_from_float', ['f64'], ['i32']),
+  wasmFuncImport('env', 'str_from_bool', '$str_from_bool', ['i32'], ['i32']),
+  wasmFuncImport('env', 'str_from_handle', '$str_from_handle', ['i32'], ['i32']),
+  wasmFuncImport('env', 'promise_resolve_i32', '$promise_resolve_i32', ['i32'], ['i32']),
+  wasmFuncImport('env', 'promise_resolve_i64', '$promise_resolve_i64', ['i64'], ['i32']),
+  wasmFuncImport('env', 'promise_resolve_f64', '$promise_resolve_f64', ['f64'], ['i32']),
+  wasmFuncImport('env', 'promise_await_i32', '$promise_await_i32', ['i32'], ['i32']),
+  wasmFuncImport('env', 'promise_await_i64', '$promise_await_i64', ['i32'], ['i64']),
+  wasmFuncImport('env', 'promise_await_f64', '$promise_await_f64', ['i32'], ['f64']),
+  wasmFuncImport('env', 'promise_is_ready', '$promise_is_ready', ['i32'], ['i32']),
+  wasmFuncImport('env', 'promise_select_first_ready', '$promise_select_first_ready', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call0', '$module_call0', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call1', '$module_call1', ['i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call2', '$module_call2', ['i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call3', '$module_call3', ['i32', 'i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call4', '$module_call4', ['i32', 'i32', 'i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call5', '$module_call5', ['i32', 'i32', 'i32', 'i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'module_call_ptr', '$module_call_ptr', ['i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call0', '$closure_call0', ['i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call1', '$closure_call1', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call2', '$closure_call2', ['i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call3', '$closure_call3', ['i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call4', '$closure_call4', ['i32', 'i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'closure_call5', '$closure_call5', ['i32', 'i32', 'i32', 'i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'mem_retain', '$mem_retain', ['i32']),
+  wasmFuncImport('env', 'mem_release', '$mem_release', ['i32']),
+  wasmFuncImport('env', 'mem_stats_live', '$mem_stats_live', [], ['i32']),
+  wasmFuncImport('env', 'vec_new', '$vec_new', [], ['i32']),
+  wasmFuncImport('env', 'vec_len', '$vec_len', ['i32'], ['i32']),
+  wasmFuncImport('env', 'vec_push', '$vec_push', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_get_has', '$vec_get_has', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_get', '$vec_get', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_pop_has', '$vec_pop_has', ['i32'], ['i32']),
+  wasmFuncImport('env', 'vec_pop', '$vec_pop', ['i32'], ['i32']),
+  wasmFuncImport('env', 'vec_clear', '$vec_clear', ['i32']),
+  wasmFuncImport('env', 'vec_take', '$vec_take', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_skip', '$vec_skip', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_any_closure', '$vec_any_closure', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_all_closure', '$vec_all_closure', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_map_closure', '$vec_map_closure', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_filter_closure', '$vec_filter_closure', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_fold_closure', '$vec_fold_closure', ['i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_find_has', '$vec_find_has', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_find', '$vec_find', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'vec_position', '$vec_position', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_new', '$hashmap_new', [], ['i32']),
+  wasmFuncImport('env', 'hashmap_len', '$hashmap_len', ['i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_insert_has', '$hashmap_insert_has', ['i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_insert_prev', '$hashmap_insert_prev', ['i32', 'i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_get_has', '$hashmap_get_has', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_get', '$hashmap_get', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_remove_has', '$hashmap_remove_has', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_remove', '$hashmap_remove', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_contains_key', '$hashmap_contains_key', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashmap_clear', '$hashmap_clear', ['i32']),
+  wasmFuncImport('env', 'hashset_new', '$hashset_new', [], ['i32']),
+  wasmFuncImport('env', 'hashset_len', '$hashset_len', ['i32'], ['i32']),
+  wasmFuncImport('env', 'hashset_insert', '$hashset_insert', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashset_contains', '$hashset_contains', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashset_remove', '$hashset_remove', ['i32', 'i32'], ['i32']),
+  wasmFuncImport('env', 'hashset_clear', '$hashset_clear', ['i32']),
+];
+
+const WASM_STANDALONE_NATIVE_IMPORT_NAMES = new Set(['str_new', 'str_concat', 'str_len', 'str_slice', 'str_eq']);
+
+const WASM_RUNTIME_PRELUDE_FUNCTIONS: WasmTextFunction[] = [
+  wasmTextFunction(
+    '__ensure_capacity',
+    [{ name: 'needed_end', type: 'i32' }],
+    [
+      wasmOp('memory.size'),
+      wasmOp('i32.const', 65536),
+      wasmOp('i32.mul'),
+      wasmOp('local.set', '$current_bytes'),
+      wasmOp('local.get', '$needed_end'),
+      wasmOp('local.get', '$current_bytes'),
+      wasmOp('i32.gt_u'),
+      wasmIf([
+        wasmOp('local.get', '$needed_end'),
+        wasmOp('i32.const', 65535),
+        wasmOp('i32.add'),
+        wasmOp('i32.const', 65536),
+        wasmOp('i32.div_u'),
+        wasmOp('local.set', '$required_pages'),
+        wasmOp('local.get', '$required_pages'),
+        wasmOp('memory.size'),
+        wasmOp('i32.sub'),
+        wasmOp('memory.grow'),
+        wasmOp('drop'),
+      ]),
+    ],
+    {
+      locals: [
+        { name: 'current_bytes', type: 'i32' },
+        { name: 'required_pages', type: 'i32' },
+      ],
+    }
+  ),
+  wasmTextFunction(
+    'alloc',
+    [{ name: 'size', type: 'i32' }],
+    [
+      wasmOp('local.get', '$size'),
+      wasmOp('i32.const', 7),
+      wasmOp('i32.add'),
+      wasmOp('i32.const', -8),
+      wasmOp('i32.and'),
+      wasmOp('local.set', '$aligned'),
+      wasmOp('local.get', '$aligned'),
+      wasmOp('i32.eqz'),
+      wasmIf([
+        wasmOp('i32.const', 8),
+        wasmOp('local.set', '$aligned'),
+      ]),
+      wasmOp('i32.const', 0),
+      wasmOp('local.set', '$prev'),
+      wasmOp('global.get', '$free_head'),
+      wasmOp('local.set', '$curr'),
+      wasmBlock(
+        [
+          wasmLoop(
+            [
+              wasmOp('local.get', '$curr'),
+              wasmOp('i32.eqz'),
+              wasmOp('br_if', '$search_done'),
+              wasmOp('local.get', '$curr'),
+              wasmOp('i32.load'),
+              wasmOp('local.set', '$curr_size'),
+              wasmOp('local.get', '$curr_size'),
+              wasmOp('local.get', '$aligned'),
+              wasmOp('i32.ge_u'),
+              wasmIf([
+                wasmOp('local.get', '$curr'),
+                wasmOp('i32.const', 4),
+                wasmOp('i32.add'),
+                wasmOp('i32.load'),
+                wasmOp('local.set', '$next'),
+                wasmOp('local.get', '$prev'),
+                wasmOp('i32.eqz'),
+                wasmIf(
+                  [
+                    wasmOp('local.get', '$next'),
+                    wasmOp('global.set', '$free_head'),
+                  ],
+                  [
+                    wasmOp('local.get', '$prev'),
+                    wasmOp('i32.const', 4),
+                    wasmOp('i32.add'),
+                    wasmOp('local.get', '$next'),
+                    wasmOp('i32.store'),
+                  ]
+                ),
+                wasmOp('local.get', '$curr'),
+                wasmOp('i32.const', 8),
+                wasmOp('i32.add'),
+                wasmOp('return'),
+              ]),
+              wasmOp('local.get', '$curr'),
+              wasmOp('local.set', '$prev'),
+              wasmOp('local.get', '$curr'),
+              wasmOp('i32.const', 4),
+              wasmOp('i32.add'),
+              wasmOp('i32.load'),
+              wasmOp('local.set', '$curr'),
+              wasmOp('br', '$search'),
+            ],
+            { label: '$search' }
+          ),
+        ],
+        { label: '$search_done' }
+      ),
+      wasmOp('global.get', '$heap_ptr'),
+      wasmOp('local.set', '$block'),
+      wasmOp('local.get', '$block'),
+      wasmOp('i32.const', 8),
+      wasmOp('i32.add'),
+      wasmOp('local.get', '$aligned'),
+      wasmOp('i32.add'),
+      wasmOp('local.set', '$needed_end'),
+      wasmOp('local.get', '$needed_end'),
+      wasmOp('call', '$__ensure_capacity'),
+      wasmOp('local.get', '$block'),
+      wasmOp('local.get', '$aligned'),
+      wasmOp('i32.store'),
+      wasmOp('local.get', '$block'),
+      wasmOp('i32.const', 4),
+      wasmOp('i32.add'),
+      wasmOp('i32.const', 0),
+      wasmOp('i32.store'),
+      wasmOp('local.get', '$needed_end'),
+      wasmOp('global.set', '$heap_ptr'),
+      wasmOp('local.get', '$block'),
+      wasmOp('i32.const', 8),
+      wasmOp('i32.add'),
+    ],
+    {
+      results: ['i32'],
+      locals: [
+        { name: 'aligned', type: 'i32' },
+        { name: 'block', type: 'i32' },
+        { name: 'prev', type: 'i32' },
+        { name: 'curr', type: 'i32' },
+        { name: 'curr_size', type: 'i32' },
+        { name: 'next', type: 'i32' },
+        { name: 'needed_end', type: 'i32' },
+      ],
+    }
+  ),
+  wasmTextFunction(
+    'free',
+    [{ name: 'ptr', type: 'i32' }],
+    [
+      wasmOp('local.get', '$ptr'),
+      wasmOp('i32.eqz'),
+      wasmIf([wasmOp('return')]),
+      wasmOp('local.get', '$ptr'),
+      wasmOp('i32.const', 8),
+      wasmOp('i32.sub'),
+      wasmOp('local.set', '$block'),
+      wasmOp('local.get', '$block'),
+      wasmOp('i32.const', 4),
+      wasmOp('i32.add'),
+      wasmOp('global.get', '$free_head'),
+      wasmOp('i32.store'),
+      wasmOp('local.get', '$block'),
+      wasmOp('global.set', '$free_head'),
+    ],
+    {
+      locals: [{ name: 'block', type: 'i32' }],
+    }
+  ),
+];
+
+const WASM_STANDALONE_STRING_FUNCTIONS: WasmTextFunction[] = [
+  wasmTextFunction(
+    '__str_copy_bytes',
+    [
+      { name: 'dest', type: 'i32' },
+      { name: 'src', type: 'i32' },
+      { name: 'len', type: 'i32' },
+    ],
+    rawInstructions([
+      '(block $copy_done',
+      '  (loop $copy_loop',
+      '    local.get $len',
+      '    i32.eqz',
+      '    br_if $copy_done',
+      '    local.get $dest',
+      '    local.get $src',
+      '    i32.load8_u',
+      '    i32.store8',
+      '    local.get $dest',
+      '    i32.const 1',
+      '    i32.add',
+      '    local.set $dest',
+      '    local.get $src',
+      '    i32.const 1',
+      '    i32.add',
+      '    local.set $src',
+      '    local.get $len',
+      '    i32.const 1',
+      '    i32.sub',
+      '    local.set $len',
+      '    br $copy_loop',
+      '  )',
+      ')',
+    ])
+  ),
+  wasmTextFunction(
+    'str_new',
+    [
+      { name: 'ptr', type: 'i32' },
+      { name: 'len', type: 'i32' },
+    ],
+    rawInstructions([
+      'local.get $len',
+      'i32.const 5',
+      'i32.add',
+      'call $alloc',
+      'local.tee $result',
+      'local.get $len',
+      'i32.store',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $ptr',
+      'local.get $len',
+      'call $__str_copy_bytes',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $len',
+      'i32.add',
+      'i32.const 0',
+      'i32.store8',
+      'local.get $result',
+    ]),
+    {
+      results: ['i32'],
+      locals: [{ name: 'result', type: 'i32' }],
+    }
+  ),
+  wasmTextFunction(
+    'str_len',
+    [{ name: 'value', type: 'i32' }],
+    rawInstructions(['local.get $value', 'i32.load']),
+    { results: ['i32'] }
+  ),
+  wasmTextFunction(
+    'str_concat',
+    [
+      { name: 'left', type: 'i32' },
+      { name: 'right', type: 'i32' },
+    ],
+    rawInstructions([
+      'local.get $left',
+      'i32.load',
+      'local.set $left_len',
+      'local.get $right',
+      'i32.load',
+      'local.set $right_len',
+      'local.get $left_len',
+      'local.get $right_len',
+      'i32.add',
+      'local.set $total_len',
+      'local.get $total_len',
+      'i32.const 5',
+      'i32.add',
+      'call $alloc',
+      'local.tee $result',
+      'local.get $total_len',
+      'i32.store',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $left',
+      'i32.const 4',
+      'i32.add',
+      'local.get $left_len',
+      'call $__str_copy_bytes',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $left_len',
+      'i32.add',
+      'local.get $right',
+      'i32.const 4',
+      'i32.add',
+      'local.get $right_len',
+      'call $__str_copy_bytes',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $total_len',
+      'i32.add',
+      'i32.const 0',
+      'i32.store8',
+      'local.get $result',
+    ]),
+    {
+      results: ['i32'],
+      locals: [
+        { name: 'left_len', type: 'i32' },
+        { name: 'right_len', type: 'i32' },
+        { name: 'total_len', type: 'i32' },
+        { name: 'result', type: 'i32' },
+      ],
+    }
+  ),
+  wasmTextFunction(
+    'str_eq',
+    [
+      { name: 'left', type: 'i32' },
+      { name: 'right', type: 'i32' },
+    ],
+    rawInstructions([
+      'local.get $left',
+      'i32.load',
+      'local.set $left_len',
+      'local.get $right',
+      'i32.load',
+      'local.set $right_len',
+      'local.get $left_len',
+      'local.get $right_len',
+      'i32.ne',
+      'if',
+      '  i32.const 0',
+      '  return',
+      'end',
+      'i32.const 0',
+      'local.set $idx',
+      '(block $eq_done',
+      '  (loop $eq_loop',
+      '    local.get $idx',
+      '    local.get $left_len',
+      '    i32.ge_u',
+      '    br_if $eq_done',
+      '    local.get $left',
+      '    i32.const 4',
+      '    i32.add',
+      '    local.get $idx',
+      '    i32.add',
+      '    i32.load8_u',
+      '    local.get $right',
+      '    i32.const 4',
+      '    i32.add',
+      '    local.get $idx',
+      '    i32.add',
+      '    i32.load8_u',
+      '    i32.ne',
+      '    if',
+      '      i32.const 0',
+      '      return',
+      '    end',
+      '    local.get $idx',
+      '    i32.const 1',
+      '    i32.add',
+      '    local.set $idx',
+      '    br $eq_loop',
+      '  )',
+      ')',
+      'i32.const 1',
+    ]),
+    {
+      results: ['i32'],
+      locals: [
+        { name: 'left_len', type: 'i32' },
+        { name: 'right_len', type: 'i32' },
+        { name: 'idx', type: 'i32' },
+      ],
+    }
+  ),
+  wasmTextFunction(
+    'str_slice',
+    [
+      { name: 'value', type: 'i32' },
+      { name: 'start', type: 'i32' },
+      { name: 'end', type: 'i32' },
+      { name: 'inclusive', type: 'i32' },
+    ],
+    rawInstructions([
+      'local.get $value',
+      'i32.load',
+      'local.set $len',
+      'local.get $start',
+      'i32.const 0',
+      'i32.lt_s',
+      'if',
+      '  i32.const 0',
+      '  local.set $normalized_start',
+      'else',
+      '  local.get $start',
+      '  local.set $normalized_start',
+      'end',
+      'local.get $end',
+      'i32.const 0',
+      'i32.lt_s',
+      'if',
+      '  local.get $len',
+      '  local.set $normalized_end',
+      'else',
+      '  local.get $end',
+      '  local.set $normalized_end',
+      'end',
+      'local.get $inclusive',
+      'if',
+      '  local.get $normalized_end',
+      '  i32.const 1',
+      '  i32.add',
+      '  local.set $normalized_end',
+      'end',
+      'local.get $normalized_end',
+      'local.get $len',
+      'i32.gt_s',
+      'if',
+      '  local.get $len',
+      '  local.set $normalized_end',
+      'end',
+      'local.get $normalized_start',
+      'local.get $len',
+      'i32.gt_s',
+      'if',
+      '  local.get $len',
+      '  local.set $normalized_start',
+      'end',
+      'local.get $normalized_end',
+      'local.get $normalized_start',
+      'i32.lt_s',
+      'if',
+      '  local.get $normalized_start',
+      '  local.set $normalized_end',
+      'end',
+      'local.get $normalized_end',
+      'local.get $normalized_start',
+      'i32.sub',
+      'local.set $slice_len',
+      'local.get $slice_len',
+      'i32.const 5',
+      'i32.add',
+      'call $alloc',
+      'local.tee $result',
+      'local.get $slice_len',
+      'i32.store',
+      'local.get $value',
+      'i32.const 4',
+      'i32.add',
+      'local.get $normalized_start',
+      'i32.add',
+      'local.set $source_ptr',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $source_ptr',
+      'local.get $slice_len',
+      'call $__str_copy_bytes',
+      'local.get $result',
+      'i32.const 4',
+      'i32.add',
+      'local.get $slice_len',
+      'i32.add',
+      'i32.const 0',
+      'i32.store8',
+      'local.get $result',
+    ]),
+    {
+      results: ['i32'],
+      locals: [
+        { name: 'len', type: 'i32' },
+        { name: 'normalized_start', type: 'i32' },
+        { name: 'normalized_end', type: 'i32' },
+        { name: 'slice_len', type: 'i32' },
+        { name: 'result', type: 'i32' },
+        { name: 'source_ptr', type: 'i32' },
+      ],
+    }
+  ),
+];
+
+export function generateWasmTextModuleFromAst(
   program: LuminaProgram,
   options: WasmCodegenOptions = {}
-): WasmCodegenResult {
+): { module: WasmTextModule; diagnostics: Diagnostic[] } {
   program = desugarListComprehensions(program);
   const infer = inferProgram(program);
   const diagnostics = [...infer.diagnostics];
+  const targetProfile = options.targetProfile ?? 'wasm-web';
 
   const enumLayout: WasmEnumLayout = new Map();
   for (const stmt of program.body) {
@@ -252,247 +957,82 @@ export function generateWATFromAst(
     enumLayout,
     structDecls,
     traitDecls,
-    traitDispatch
+    traitDispatch,
+    targetProfile
   );
   const functions = program.body.filter((stmt): stmt is LuminaFnDecl => stmt.type === 'FnDecl');
   const structs = program.body.filter((stmt): stmt is LuminaStructDecl => stmt.type === 'StructDecl');
-
-  builder.append('(module');
-  builder.append('  (import "env" "print_int" (func $print_int (param i32)))');
-  builder.append('  (import "env" "print_float" (func $print_float (param f64)))');
-  builder.append('  (import "env" "print_bool" (func $print_bool (param i32)))');
-  builder.append('  (import "env" "print_string" (func $print_string (param i32)))');
-  builder.append('  (import "env" "print_i64" (func $print_i64 (param i64)))');
-  builder.append('  (import "env" "abs_int" (func $abs_int (param i32) (result i32)))');
-  builder.append('  (import "env" "abs_float" (func $abs_float (param f64) (result f64)))');
-  builder.append('  (import "env" "str_new" (func $str_new (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "str_concat" (func $str_concat (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "str_len" (func $str_len (param i32) (result i32)))');
-  builder.append('  (import "env" "str_slice" (func $str_slice (param i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "str_eq" (func $str_eq (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "str_from_int" (func $str_from_int (param i32) (result i32)))');
-  builder.append('  (import "env" "str_from_i64" (func $str_from_i64 (param i64) (result i32)))');
-  builder.append('  (import "env" "str_from_u64" (func $str_from_u64 (param i64) (result i32)))');
-  builder.append('  (import "env" "str_from_float" (func $str_from_float (param f64) (result i32)))');
-  builder.append('  (import "env" "str_from_bool" (func $str_from_bool (param i32) (result i32)))');
-  builder.append('  (import "env" "str_from_handle" (func $str_from_handle (param i32) (result i32)))');
-  builder.append('  (import "env" "promise_resolve_i32" (func $promise_resolve_i32 (param i32) (result i32)))');
-  builder.append('  (import "env" "promise_resolve_i64" (func $promise_resolve_i64 (param i64) (result i32)))');
-  builder.append('  (import "env" "promise_resolve_f64" (func $promise_resolve_f64 (param f64) (result i32)))');
-  builder.append('  (import "env" "promise_await_i32" (func $promise_await_i32 (param i32) (result i32)))');
-  builder.append('  (import "env" "promise_await_i64" (func $promise_await_i64 (param i32) (result i64)))');
-  builder.append('  (import "env" "promise_await_f64" (func $promise_await_f64 (param i32) (result f64)))');
-  builder.append('  (import "env" "promise_is_ready" (func $promise_is_ready (param i32) (result i32)))');
-  builder.append('  (import "env" "promise_select_first_ready" (func $promise_select_first_ready (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call0" (func $module_call0 (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call1" (func $module_call1 (param i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call2" (func $module_call2 (param i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call3" (func $module_call3 (param i32 i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call4" (func $module_call4 (param i32 i32 i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call5" (func $module_call5 (param i32 i32 i32 i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "module_call_ptr" (func $module_call_ptr (param i32 i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "mem_retain" (func $mem_retain (param i32)))');
-  builder.append('  (import "env" "mem_release" (func $mem_release (param i32)))');
-  builder.append('  (import "env" "mem_stats_live" (func $mem_stats_live (result i32)))');
-  builder.append('  (import "env" "vec_new" (func $vec_new (result i32)))');
-  builder.append('  (import "env" "vec_len" (func $vec_len (param i32) (result i32)))');
-  builder.append('  (import "env" "vec_push" (func $vec_push (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_get_has" (func $vec_get_has (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_get" (func $vec_get (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_pop_has" (func $vec_pop_has (param i32) (result i32)))');
-  builder.append('  (import "env" "vec_pop" (func $vec_pop (param i32) (result i32)))');
-  builder.append('  (import "env" "vec_clear" (func $vec_clear (param i32)))');
-  builder.append('  (import "env" "vec_take" (func $vec_take (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_skip" (func $vec_skip (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_any_closure" (func $vec_any_closure (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_all_closure" (func $vec_all_closure (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_map_closure" (func $vec_map_closure (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_filter_closure" (func $vec_filter_closure (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_fold_closure" (func $vec_fold_closure (param i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_find_has" (func $vec_find_has (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_find" (func $vec_find (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "vec_position" (func $vec_position (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_new" (func $hashmap_new (result i32)))');
-  builder.append('  (import "env" "hashmap_len" (func $hashmap_len (param i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_insert_has" (func $hashmap_insert_has (param i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_insert_prev" (func $hashmap_insert_prev (param i32 i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_get_has" (func $hashmap_get_has (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_get" (func $hashmap_get (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_remove_has" (func $hashmap_remove_has (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_remove" (func $hashmap_remove (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_contains_key" (func $hashmap_contains_key (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashmap_clear" (func $hashmap_clear (param i32)))');
-  builder.append('  (import "env" "hashset_new" (func $hashset_new (result i32)))');
-  builder.append('  (import "env" "hashset_len" (func $hashset_len (param i32) (result i32)))');
-  builder.append('  (import "env" "hashset_insert" (func $hashset_insert (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashset_contains" (func $hashset_contains (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashset_remove" (func $hashset_remove (param i32 i32) (result i32)))');
-  builder.append('  (import "env" "hashset_clear" (func $hashset_clear (param i32)))');
-  builder.append('  (memory (export "memory") 1)');
-  builder.append('  (global $heap_ptr (mut i32) (i32.const 4096))');
-  builder.append('  (global $free_head (mut i32) (i32.const 0))');
-  builder.append('  (func $__ensure_capacity (param $needed_end i32)');
-  builder.append('    (local $current_bytes i32)');
-  builder.append('    (local $required_pages i32)');
-  builder.append('    memory.size');
-  builder.append('    i32.const 65536');
-  builder.append('    i32.mul');
-  builder.append('    local.set $current_bytes');
-  builder.append('    local.get $needed_end');
-  builder.append('    local.get $current_bytes');
-  builder.append('    i32.gt_u');
-  builder.append('    if');
-  builder.append('      local.get $needed_end');
-  builder.append('      i32.const 65535');
-  builder.append('      i32.add');
-  builder.append('      i32.const 65536');
-  builder.append('      i32.div_u');
-  builder.append('      local.set $required_pages');
-  builder.append('      local.get $required_pages');
-  builder.append('      memory.size');
-  builder.append('      i32.sub');
-  builder.append('      memory.grow');
-  builder.append('      drop');
-  builder.append('    end');
-  builder.append('  )');
-  builder.append('  (func $alloc (param $size i32) (result i32)');
-  builder.append('    (local $aligned i32)');
-  builder.append('    (local $block i32)');
-  builder.append('    (local $prev i32)');
-  builder.append('    (local $curr i32)');
-  builder.append('    (local $curr_size i32)');
-  builder.append('    (local $next i32)');
-  builder.append('    (local $needed_end i32)');
-  builder.append('    local.get $size');
-  builder.append('    i32.const 7');
-  builder.append('    i32.add');
-  builder.append('    i32.const -8');
-  builder.append('    i32.and');
-  builder.append('    local.set $aligned');
-  builder.append('    local.get $aligned');
-  builder.append('    i32.eqz');
-  builder.append('    if');
-  builder.append('      i32.const 8');
-  builder.append('      local.set $aligned');
-  builder.append('    end');
-  builder.append('    i32.const 0');
-  builder.append('    local.set $prev');
-  builder.append('    global.get $free_head');
-  builder.append('    local.set $curr');
-  builder.append('    (block $search_done');
-  builder.append('      (loop $search');
-  builder.append('        local.get $curr');
-  builder.append('        i32.eqz');
-  builder.append('        br_if $search_done');
-  builder.append('        local.get $curr');
-  builder.append('        i32.load');
-  builder.append('        local.set $curr_size');
-  builder.append('        local.get $curr_size');
-  builder.append('        local.get $aligned');
-  builder.append('        i32.ge_u');
-  builder.append('        if');
-  builder.append('          local.get $curr');
-  builder.append('          i32.const 4');
-  builder.append('          i32.add');
-  builder.append('          i32.load');
-  builder.append('          local.set $next');
-  builder.append('          local.get $prev');
-  builder.append('          i32.eqz');
-  builder.append('          if');
-  builder.append('            local.get $next');
-  builder.append('            global.set $free_head');
-  builder.append('          else');
-  builder.append('            local.get $prev');
-  builder.append('            i32.const 4');
-  builder.append('            i32.add');
-  builder.append('            local.get $next');
-  builder.append('            i32.store');
-  builder.append('          end');
-  builder.append('          local.get $curr');
-  builder.append('          i32.const 8');
-  builder.append('          i32.add');
-  builder.append('          return');
-  builder.append('        end');
-  builder.append('        local.get $curr');
-  builder.append('        local.set $prev');
-  builder.append('        local.get $curr');
-  builder.append('        i32.const 4');
-  builder.append('        i32.add');
-  builder.append('        i32.load');
-  builder.append('        local.set $curr');
-  builder.append('        br $search');
-  builder.append('      )');
-  builder.append('    )');
-  builder.append('    global.get $heap_ptr');
-  builder.append('    local.set $block');
-  builder.append('    local.get $block');
-  builder.append('    i32.const 8');
-  builder.append('    i32.add');
-  builder.append('    local.get $aligned');
-  builder.append('    i32.add');
-  builder.append('    local.set $needed_end');
-  builder.append('    local.get $needed_end');
-  builder.append('    call $__ensure_capacity');
-  builder.append('    local.get $block');
-  builder.append('    local.get $aligned');
-  builder.append('    i32.store');
-  builder.append('    local.get $block');
-  builder.append('    i32.const 4');
-  builder.append('    i32.add');
-  builder.append('    i32.const 0');
-  builder.append('    i32.store');
-  builder.append('    local.get $needed_end');
-  builder.append('    global.set $heap_ptr');
-  builder.append('    local.get $block');
-  builder.append('    i32.const 8');
-  builder.append('    i32.add');
-  builder.append('  )');
-  builder.append('  (func $free (param $ptr i32)');
-  builder.append('    (local $block i32)');
-  builder.append('    local.get $ptr');
-  builder.append('    i32.eqz');
-  builder.append('    if');
-  builder.append('      return');
-  builder.append('    end');
-  builder.append('    local.get $ptr');
-  builder.append('    i32.const 8');
-  builder.append('    i32.sub');
-  builder.append('    local.set $block');
-  builder.append('    local.get $block');
-  builder.append('    i32.const 4');
-  builder.append('    i32.add');
-  builder.append('    global.get $free_head');
-  builder.append('    i32.store');
-  builder.append('    local.get $block');
-  builder.append('    global.set $free_head');
-  builder.append('  )');
+  const module = createEmptyWasmTextModule();
+  module.memories.push('  (memory (export "memory") 1)');
+  module.globals.push('  (global $heap_ptr (mut i32) (i32.const 4096))');
+  module.globals.push('  (global $free_head (mut i32) (i32.const 0))');
+  module.functions.push(...WASM_RUNTIME_PRELUDE_FUNCTIONS);
+  if (targetProfile === 'wasm-standalone') {
+    module.functions.push(...WASM_STANDALONE_STRING_FUNCTIONS);
+  }
   for (const struct of structs) {
-    builder.append(builder.emitStructLayout(struct));
+    module.functions.push(builder.emitStructLayout(struct));
   }
   for (const fn of functions) {
-    builder.append(builder.emitFunction(fn));
+    module.functions.push(builder.emitFunction(fn));
   }
   for (const implMethod of implMethods) {
-    builder.append(builder.emitFunction(implMethod.fn));
+    module.functions.push(builder.emitFunction(implMethod.fn));
   }
   const lambdaFns = builder.emitSynthesizedLambdas();
-  if (lambdaFns.trim().length > 0) {
-    builder.append(lambdaFns);
+  if (lambdaFns.length > 0) {
+    module.functions.push(...lambdaFns);
   }
   if (options.exportMain !== false) {
     for (const fn of functions) {
-      builder.append(`  (export "${fn.name}" (func $${fn.name}))`);
+      module.exports.push(`  (export "${fn.name}" (func $${fn.name}))`);
     }
   }
-  builder.append('  (export "__alloc" (func $alloc))');
-  builder.append('  (export "__free" (func $free))');
+  module.exports.push('  (export "__alloc" (func $alloc))');
+  module.exports.push('  (export "__free" (func $free))');
   for (const lambdaFn of builder.getSynthesizedLambdaFunctionNames()) {
-    builder.append(`  (export "${lambdaFn}" (func $${lambdaFn}))`);
+    module.exports.push(`  (export "${lambdaFn}" (func $${lambdaFn}))`);
   }
-  builder.append(builder.emitStringDataSegments());
-  builder.append(')');
+  const stringData = builder.emitStringDataSegments();
+  if (stringData.trim().length > 0) {
+    module.data.push(stringData);
+  }
+  const availableHostImports =
+    targetProfile === 'wasm-standalone'
+      ? WASM_HOST_IMPORTS.filter((spec) => !WASM_STANDALONE_NATIVE_IMPORT_NAMES.has(stripDollar(spec.as)))
+      : WASM_HOST_IMPORTS;
+  const usedImports = collectUsedImports(module.functions, availableHostImports);
+  if (targetProfile === 'wasm-standalone' && usedImports.length > 0) {
+    const unsupported = usedImports.map((spec) => spec.name).join(', ');
+    diagnostics.push({
+      severity: 'error',
+      message: `WASM standalone target cannot lower host runtime imports yet: ${unsupported}`,
+      code: 'WASM-STANDALONE-001',
+      location: program.location ?? defaultLocation,
+      source: 'lumina',
+    });
+  }
+  module.imports.push(...usedImports);
+  if (options.emitDebugMetadata) {
+    module.debugMetadata = {
+      version: 1,
+      targetProfile,
+      sourceFile: options.sourceFile,
+      functionNames: module.functions.map((fn) => fn.name),
+      exportNames: parseExportedFunctionNames(module.exports),
+      importNames: module.imports.map((spec) => `${spec.module}.${spec.name}`),
+    };
+  }
 
-  return { wat: builder.toString(), diagnostics };
+  return { module, diagnostics };
+}
+
+export function generateWATFromAst(
+  program: LuminaProgram,
+  options: WasmCodegenOptions = {}
+): WasmCodegenResult {
+  const { module, diagnostics } = generateWasmTextModuleFromAst(program, options);
+  return { wat: emitWAT(module), diagnostics };
 }
 
 class WasmBuilder {
@@ -520,6 +1060,7 @@ class WasmBuilder {
   private lambdaCounter = 0;
   private lambdaByExprId = new Map<number, WasmLambdaInfo>();
   private synthesizedLambdas: WasmLambdaInfo[] = [];
+  private targetProfile: 'wasm' | 'wasm-web' | 'wasm-standalone';
 
   constructor(
     diagnostics: Diagnostic[],
@@ -529,7 +1070,8 @@ class WasmBuilder {
     enumLayout: WasmEnumLayout,
     structDecls: Map<string, LuminaStructDecl>,
     traitDecls: Map<string, LuminaTraitDecl>,
-    traitDispatch: WasmTraitDispatchMap
+    traitDispatch: WasmTraitDispatchMap,
+    targetProfile: 'wasm' | 'wasm-web' | 'wasm-standalone'
   ) {
     this.diagnostics = diagnostics;
     this.subst = subst;
@@ -539,6 +1081,7 @@ class WasmBuilder {
     this.structDecls = structDecls;
     this.traitDecls = traitDecls;
     this.traitDispatch = traitDispatch;
+    this.targetProfile = targetProfile;
     for (const methods of traitDispatch.values()) {
       for (const dispatch of methods.values()) {
         this.traitDispatchByFn.set(dispatch.wasmName, dispatch);
@@ -688,13 +1231,13 @@ class WasmBuilder {
     return lines.join('\n');
   }
 
-  emitSynthesizedLambdas(): string {
-    const lines: string[] = [];
+  emitSynthesizedLambdas(): WasmTextFunction[] {
+    const functions: WasmTextFunction[] = [];
     for (let i = 0; i < this.synthesizedLambdas.length; i += 1) {
       const info = this.synthesizedLambdas[i];
-      lines.push(this.emitFunction(this.createLambdaFunctionDecl(info)));
+      functions.push(this.emitFunction(this.createLambdaFunctionDecl(info)));
     }
-    return lines.join('\n');
+    return functions;
   }
 
   getSynthesizedLambdaFunctionNames(): string[] {
@@ -766,6 +1309,9 @@ class WasmBuilder {
           visitExpr(expr.right, scope);
           return;
         case 'Call':
+          if (!expr.receiver && !expr.enumName && expr.callee.type !== 'Identifier') {
+            visitExpr(expr.callee, scope);
+          }
           if (expr.receiver) visitExpr(expr.receiver, scope);
           for (const arg of expr.args ?? []) visitExpr(arg.value, scope);
           return;
@@ -903,33 +1449,38 @@ class WasmBuilder {
     return Array.from(captures);
   }
 
-  emitStructLayout(struct: LuminaStructDecl): string {
+  emitStructLayout(struct: LuminaStructDecl): WasmTextFunction {
     const layout = this.structLayout.get(struct.name);
-    if (!layout) return '';
-    const lines: string[] = [];
-    lines.push(`  ;; Struct ${struct.name}`);
-    lines.push(`  ;; Total size: ${layout.totalSize} bytes`);
-    const params = layout.orderedFields.map((field) => `(param $${field.name} ${field.wasmType})`).join(' ');
-    lines.push(`  (func $${sanitizeWasmIdent(struct.name)}_new ${params} (result i32)`);
-    lines.push('    (local $__struct_ptr i32)');
-    lines.push(`    i32.const ${layout.totalSize}`);
-    lines.push('    call $alloc');
-    lines.push('    local.set $__struct_ptr');
+    if (!layout) {
+      return wasmTextFunction(`${sanitizeWasmIdent(struct.name)}_new`, [], [wasmOp('i32.const', 0)], { results: ['i32'] });
+    }
+    const body: WasmTextInstruction[] = [];
+    body.push(wasmOp('i32.const', layout.totalSize));
+    body.push(wasmOp('call', '$alloc'));
+    body.push(wasmOp('local.set', '$__struct_ptr'));
     for (const field of layout.orderedFields) {
-      lines.push('    local.get $__struct_ptr');
+      body.push(wasmOp('local.get', '$__struct_ptr'));
       if (field.offset !== 0) {
-        lines.push(`    i32.const ${field.offset}`);
-        lines.push('    i32.add');
+        body.push(wasmOp('i32.const', field.offset));
+        body.push(wasmOp('i32.add'));
       }
-      lines.push(`    local.get $${field.name}`);
-      lines.push(`    ${field.wasmType}.store`);
+      body.push(wasmOp('local.get', `$${field.name}`));
+      body.push(wasmOp(`${field.wasmType}.store`));
     }
-    lines.push('    local.get $__struct_ptr');
-    lines.push('  )');
-    for (const field of layout.orderedFields) {
-      lines.push(`  ;;   field ${field.name}: offset ${field.offset}, size ${field.size}, align ${field.align}`);
-    }
-    return lines.join('\n');
+    body.push(wasmOp('local.get', '$__struct_ptr'));
+    return wasmTextFunction(
+      `${sanitizeWasmIdent(struct.name)}_new`,
+      layout.orderedFields.map((field) => ({ name: field.name, type: field.wasmType })),
+      body,
+      {
+        results: ['i32'],
+        locals: [{ name: '__struct_ptr', type: 'i32' }],
+        commentsBefore: [`  ;; Struct ${struct.name}`, `  ;; Total size: ${layout.totalSize} bytes`],
+        commentsAfter: layout.orderedFields.map(
+          (field) => `  ;;   field ${field.name}: offset ${field.offset}, size ${field.size}, align ${field.align}`
+        ),
+      }
+    );
   }
 
   private calculateTypeSize(typeExpr: LuminaTypeExpr, location?: Location): number {
@@ -1200,12 +1751,12 @@ class WasmBuilder {
     return Math.trunc(value);
   }
 
-  emitFunction(fn: LuminaFnDecl): string {
+  emitFunction(fn: LuminaFnDecl): WasmTextFunction {
     const paramTypes = this.fnParamTypes.get(fn.name) ?? [];
-    const params = fn.params.map((param, idx) => {
-      const wasmType = this.typeToWasm(paramTypes[idx], param.location) ?? 'i32';
-      return `(param $${param.name} ${wasmType})`;
-    });
+    const params = fn.params.map((param, idx) => ({
+      name: param.name,
+      type: this.typeToWasm(paramTypes[idx], param.location) ?? 'i32',
+    }));
     const prevLocalTypes = this.currentLocalTypes;
     const prevLocalLambdas = this.localLambdaBindings;
     this.currentLocalTypes = new Map();
@@ -1223,24 +1774,18 @@ class WasmBuilder {
     this.currentFunctionReturn = returnType;
     this.currentFunctionReturnType = this.inferFunctionReturnTypeNode(fn);
     this.currentFunctionIsAsync = !!fn.async;
-    const resultSig = returnType ? `(result ${returnType})` : '';
 
     const locals = this.collectLocals(fn);
-    const localsDecl = locals.length > 0 ? `  ${locals.join(' ')}` : '';
-
-    const bodyLines = this.emitBlock(fn.body.body ?? [], false);
-    const lines = [
-      `  (func $${fn.name} ${params.join(' ')} ${resultSig}`.trimEnd(),
-      localsDecl,
-      ...bodyLines.map((line) => `    ${line}`),
-      '  )',
-    ];
+    const bodyInstructions = this.emitBlockInstructions(fn.body.body ?? [], false);
     this.currentFunctionReturn = null;
     this.currentFunctionReturnType = undefined;
     this.currentFunctionIsAsync = false;
     this.currentLocalTypes = prevLocalTypes;
     this.localLambdaBindings = prevLocalLambdas;
-    return lines.join('\n');
+    return wasmTextFunction(fn.name, params, bodyInstructions, {
+      results: returnType ? [returnType] : [],
+      locals,
+    });
   }
 
   private inferReturnType(fn: LuminaFnDecl): WasmValType | null {
@@ -1324,12 +1869,12 @@ class WasmBuilder {
     return undefined;
   }
 
-  private collectLocals(fn: LuminaFnDecl): string[] {
-    const locals: string[] = [];
+  private collectLocals(fn: LuminaFnDecl): WasmNamedValue[] {
+    const locals: WasmNamedValue[] = [];
     const seen = new Set<string>();
     const addLocal = (name: string, wasmType: WasmValType | 'i32' | 'f64' = 'i32') => {
       if (seen.has(name)) return;
-      locals.push(`(local $${name} ${wasmType})`);
+      locals.push({ name, type: wasmType });
       seen.add(name);
     };
     const walkExpr = (expr: LuminaExpr) => {
@@ -1351,12 +1896,24 @@ class WasmBuilder {
           walkExpr(expr.right);
           return;
         case 'Call':
+          if (expr.enumName && this.enumUsesHeapRepresentation(expr.enumName)) {
+            addLocal(this.getEnumAllocTempName(expr), 'i32');
+          }
+          if (!expr.receiver && !expr.enumName && expr.callee.type !== 'Identifier') {
+            walkExpr(expr.callee);
+          }
           if (expr.receiver) walkExpr(expr.receiver);
           for (const arg of expr.args ?? []) walkExpr(arg.value);
           return;
-        case 'Member':
+        case 'Member': {
+          const enumName = this.resolveEnumNameFromExpr(expr.object);
+          if (enumName && this.enumUsesHeapRepresentation(enumName)) {
+            const variantInfo = this.resolveEnumVariantInfo(enumName, expr.property);
+            if (variantInfo) addLocal(this.getEnumAllocTempName(expr), 'i32');
+          }
           walkExpr(expr.object);
           return;
+        }
         case 'Index':
           walkExpr(expr.object);
           walkExpr(expr.index);
@@ -1415,6 +1972,7 @@ class WasmBuilder {
     };
     addLocal('__enum_tmp', 'i32');
     addLocal('__tmp_i32', 'i32');
+    addLocal('__tmp_i32_b', 'i32');
     addLocal('__slice_obj', 'i32');
     addLocal('__slice_start', 'i32');
     addLocal('__slice_end', 'i32');
@@ -1496,6 +2054,417 @@ class WasmBuilder {
     };
     fn.body?.body?.forEach(walk);
     return locals;
+  }
+
+  private emitExprInstructions(expr: LuminaExpr): WasmTextInstruction[] {
+    if (expr.type === 'MatchExpr') {
+      const lowered = this.emitMatchExprInstructions(expr);
+      if (lowered) return lowered;
+      const raw = this.emitMatchExpr(expr);
+      if (raw) return rawInstructions(raw);
+      const fallbackType = this.inferExprWasmType(expr) ?? 'i32';
+      return [wasmRaw(this.wasmConstZero(fallbackType))];
+    }
+    return rawInstructions(this.emitExpr(expr));
+  }
+
+  private emitMatchExprInstructions(expr: Extract<LuminaExpr, { type: 'MatchExpr' }>): WasmTextInstruction[] | null {
+    const valueType = typeof expr.value.id === 'number' ? this.exprTypes.get(expr.value.id) : undefined;
+    const resultType = this.typeToWasm(typeof expr.id === 'number' ? this.exprTypes.get(expr.id) : undefined, expr.location) ?? 'i32';
+    const tempName = this.getMatchExprTempName(expr);
+    const label = `$match_expr_end_${this.nodeTempSuffix(expr)}`;
+    const candidateArms = expr.arms.filter((arm) => this.isPatternStaticallyReachable(arm.pattern, valueType));
+
+    const buildArm = (index: number): WasmTextInstruction[] | null => {
+      if (index >= candidateArms.length) {
+        return [wasmOp('unreachable')];
+      }
+      const arm = candidateArms[index];
+      const condLines = this.emitPatternConditionFromLocal(arm.pattern, tempName, valueType);
+      const bindLines = this.emitPatternBindingsFromLocal(arm.pattern, tempName, valueType);
+      if (!condLines || !bindLines) return null;
+      const thenExpr = this.emitExprInstructions(arm.body);
+      const elseExpr = buildArm(index + 1);
+      if (!elseExpr) return null;
+      const thenBody: WasmTextInstruction[] = [...rawInstructions(bindLines)];
+      if (arm.guard) {
+        thenBody.push(...this.emitExprInstructions(arm.guard));
+        thenBody.push(wasmIf(thenExpr, elseExpr, [resultType]));
+      } else {
+        thenBody.push(...thenExpr);
+      }
+      return [...rawInstructions(condLines), wasmIf(thenBody, elseExpr, [resultType])];
+    };
+
+    const armInstructions = buildArm(0);
+    if (!armInstructions) return null;
+    return [
+      ...this.emitExprInstructions(expr.value),
+      wasmOp('local.set', `$${tempName}`),
+      wasmBlock(armInstructions, { label, results: [resultType] }),
+    ];
+  }
+
+  private emitBlockInstructions(statements: LuminaStatement[], scoped: boolean = true): WasmTextInstruction[] {
+    const savedTypes = this.currentLocalTypes;
+    const savedLambdas = this.localLambdaBindings;
+    if (scoped) {
+      this.currentLocalTypes = new Map(savedTypes);
+      this.localLambdaBindings = new Map(savedLambdas);
+    }
+    const instructions: WasmTextInstruction[] = [];
+    for (let idx = 0; idx < statements.length; idx += 1) {
+      const stmt = statements[idx];
+      switch (stmt.type) {
+        case 'Let': {
+          instructions.push(...this.emitExprInstructions(stmt.value));
+          instructions.push(wasmOp('local.set', `$${stmt.name}`));
+          if (typeof stmt.value.id === 'number') {
+            const inferred = this.exprTypes.get(stmt.value.id);
+            if (inferred) this.currentLocalTypes.set(stmt.name, inferred);
+          } else if (stmt.value.type === 'Identifier') {
+            const inherited = this.currentLocalTypes.get(stmt.value.name);
+            if (inherited) this.currentLocalTypes.set(stmt.name, inherited);
+            const lambda = this.localLambdaBindings.get(stmt.value.name);
+            if (lambda) this.localLambdaBindings.set(stmt.name, lambda);
+          } else if (stmt.value.type === 'StructLiteral') {
+            this.currentLocalTypes.set(stmt.name, { kind: 'adt', name: stmt.value.name, params: [] });
+          }
+          if (stmt.value.type === 'Lambda') {
+            this.localLambdaBindings.set(stmt.name, this.getOrCreateLambdaInfo(stmt.value));
+          } else if (stmt.value.type !== 'Identifier') {
+            this.localLambdaBindings.delete(stmt.name);
+          }
+          break;
+        }
+        case 'Assign': {
+          if (stmt.target.type === 'Identifier') {
+            instructions.push(...this.emitExprInstructions(stmt.value));
+            instructions.push(wasmOp('local.set', `$${stmt.target.name}`));
+            if (stmt.value.type === 'Lambda') {
+              this.localLambdaBindings.set(stmt.target.name, this.getOrCreateLambdaInfo(stmt.value));
+            } else if (stmt.value.type === 'Identifier') {
+              const lambda = this.localLambdaBindings.get(stmt.value.name);
+              if (lambda) this.localLambdaBindings.set(stmt.target.name, lambda);
+              else this.localLambdaBindings.delete(stmt.target.name);
+            } else {
+              this.localLambdaBindings.delete(stmt.target.name);
+            }
+          } else if (stmt.target.type === 'Member') {
+            const fieldLookup = this.resolveStructFieldInfo(stmt.target);
+            if (fieldLookup.kind !== 'ok') {
+              this.reportCodegenError(
+                this.describeStructFieldLookupFailure(stmt.target, fieldLookup),
+                stmt.location,
+                'WASM-MEMBER-001'
+              );
+              instructions.push(wasmOp('unreachable'));
+              break;
+            }
+            const fieldInfo = fieldLookup.field;
+            instructions.push(...this.emitExprInstructions(stmt.target.object));
+            if (fieldInfo.offset !== 0) {
+              instructions.push(wasmOp('i32.const', fieldInfo.offset));
+              instructions.push(wasmOp('i32.add'));
+            }
+            instructions.push(...this.emitExprInstructions(stmt.value));
+            instructions.push(wasmOp(`${fieldInfo.wasmType}.store`));
+          } else {
+            const unreachableTarget = stmt.target as never as { type?: string };
+            throw new Error(
+              `[internal] unreachable assign target kind in WASM codegen: ${unreachableTarget.type ?? 'unknown'}`
+            );
+          }
+          break;
+        }
+        case 'Return': {
+          if (this.currentFunctionIsAsync) {
+            instructions.push(...rawInstructions(this.wrapValueAsPromise(stmt.value)));
+          } else {
+            instructions.push(...this.emitExprInstructions(stmt.value));
+          }
+          instructions.push(wasmOp('return'));
+          break;
+        }
+        case 'Break': {
+          const exitLabel = this.loopExitLabels[this.loopExitLabels.length - 1];
+          if (!exitLabel) {
+            this.reportCodegenError(`'break' outside loop`, stmt.location, 'WASM-LOOP-001');
+            instructions.push(wasmOp('unreachable'));
+            break;
+          }
+          instructions.push(wasmOp('br', exitLabel));
+          break;
+        }
+        case 'Continue': {
+          const continueLabel = this.loopContinueLabels[this.loopContinueLabels.length - 1];
+          if (!continueLabel) {
+            this.reportCodegenError(`'continue' outside loop`, stmt.location, 'WASM-LOOP-001');
+            instructions.push(wasmOp('unreachable'));
+            break;
+          }
+          instructions.push(wasmOp('br', continueLabel));
+          break;
+        }
+        case 'ExprStmt': {
+          instructions.push(...this.emitExprInstructions(stmt.expr));
+          const isLast = idx === statements.length - 1;
+          const isImplicitReturn = !scoped && isLast && this.currentFunctionReturn !== null;
+          if (this.exprReturnsValue(stmt.expr) && !isImplicitReturn) {
+            instructions.push(wasmOp('drop'));
+          }
+          break;
+        }
+        case 'If':
+          instructions.push(...this.emitIfInstructions(stmt));
+          break;
+        case 'IfLet':
+          instructions.push(...this.emitIfLetInstructions(stmt));
+          break;
+        case 'While':
+          instructions.push(...this.emitWhileInstructions(stmt));
+          break;
+        case 'WhileLet':
+          instructions.push(...this.emitWhileLetInstructions(stmt));
+          break;
+        case 'For':
+          instructions.push(...this.emitForInstructions(stmt));
+          break;
+        case 'MatchStmt': {
+          const lowered = this.emitMatchStmtInstructions(stmt);
+          if (lowered) {
+            instructions.push(...lowered);
+          } else {
+            instructions.push(wasmOp('unreachable'));
+          }
+          break;
+        }
+        case 'TraitDecl':
+        case 'ImplDecl':
+        case 'StructDecl':
+        case 'EnumDecl':
+        case 'TypeDecl':
+        case 'Import':
+        case 'MacroRulesDecl':
+        case 'ShaderDecl':
+          instructions.push(wasmOp('nop'));
+          break;
+        case 'FnDecl':
+          this.reportCodegenError(
+            `nested function declaration '${stmt.name}' inside executable block is not supported by the WASM backend`,
+            stmt.location,
+            'WASM-STMT-001'
+          );
+          instructions.push(wasmOp('nop'));
+          break;
+        case 'Block':
+          instructions.push(...this.emitBlockInstructions(stmt.body ?? [], true));
+          break;
+        default:
+          instructions.push(wasmOp('nop'));
+          break;
+      }
+    }
+    if (scoped) {
+      this.currentLocalTypes = savedTypes;
+      this.localLambdaBindings = savedLambdas;
+    }
+    return instructions;
+  }
+
+  private emitIfInstructions(stmt: {
+    condition: LuminaExpr;
+    thenBlock: { body?: LuminaStatement[] };
+    elseBlock?: { body?: LuminaStatement[] } | null;
+  }): WasmTextInstruction[] {
+    return [
+      ...this.emitExprInstructions(stmt.condition),
+      wasmIf(
+        this.emitBlockInstructions(stmt.thenBlock?.body ?? [], true),
+        stmt.elseBlock ? this.emitBlockInstructions(stmt.elseBlock.body ?? [], true) : []
+      ),
+    ];
+  }
+
+  private emitIfLetInstructions(stmt: Extract<LuminaStatement, { type: 'IfLet' }>): WasmTextInstruction[] {
+    const valueType = typeof stmt.value.id === 'number' ? this.exprTypes.get(stmt.value.id) : undefined;
+    const tempName = this.getIfLetTempName(stmt);
+    const condLines = this.emitPatternConditionFromLocal(stmt.pattern, tempName, valueType);
+    const bindLines = this.emitPatternBindingsFromLocal(stmt.pattern, tempName, valueType);
+    if (!condLines || !bindLines) {
+      const instructions: WasmTextInstruction[] = [...this.emitExprInstructions(stmt.value), wasmOp('drop')];
+      if (stmt.elseBlock) {
+        instructions.push(...this.emitBlockInstructions(stmt.elseBlock.body ?? [], true));
+      }
+      return instructions;
+    }
+    return [
+      ...this.emitExprInstructions(stmt.value),
+      wasmOp('local.set', `$${tempName}`),
+      ...rawInstructions(condLines),
+      wasmIf(
+        [...rawInstructions(bindLines), ...this.emitBlockInstructions(stmt.thenBlock.body ?? [], true)],
+        stmt.elseBlock ? this.emitBlockInstructions(stmt.elseBlock.body ?? [], true) : []
+      ),
+    ];
+  }
+
+  private emitWhileInstructions(stmt: Extract<LuminaStatement, { type: 'While' }>): WasmTextInstruction[] {
+    const suffix = this.nodeTempSuffix(stmt);
+    const loopLabel = `$while_loop_${suffix}`;
+    const exitLabel = `$while_exit_${suffix}`;
+    const bodyInstructions = this.withLoopLabels(loopLabel, exitLabel, () =>
+      this.emitBlockInstructions(stmt.body.body ?? [], true)
+    );
+    return [
+      wasmBlock(
+        [
+          wasmLoop(
+            [
+              ...this.emitExprInstructions(stmt.condition),
+              wasmOp('i32.eqz'),
+              wasmOp('br_if', exitLabel),
+              ...bodyInstructions,
+              wasmOp('br', loopLabel),
+            ],
+            { label: loopLabel }
+          ),
+        ],
+        { label: exitLabel }
+      ),
+    ];
+  }
+
+  private emitWhileLetInstructions(stmt: Extract<LuminaStatement, { type: 'WhileLet' }>): WasmTextInstruction[] {
+    const suffix = this.nodeTempSuffix(stmt);
+    const loopLabel = `$whilelet_loop_${suffix}`;
+    const exitLabel = `$whilelet_exit_${suffix}`;
+    const tempName = this.getWhileLetTempName(stmt);
+    const valueType = typeof stmt.value.id === 'number' ? this.exprTypes.get(stmt.value.id) : undefined;
+    const condLines = this.emitPatternConditionFromLocal(stmt.pattern, tempName, valueType);
+    const bindLines = this.emitPatternBindingsFromLocal(stmt.pattern, tempName, valueType);
+    if (!condLines || !bindLines) {
+      return [];
+    }
+    const bodyInstructions = this.withLoopLabels(loopLabel, exitLabel, () =>
+      this.emitBlockInstructions(stmt.body.body ?? [], true)
+    );
+    return [
+      wasmBlock(
+        [
+          wasmLoop(
+            [
+              ...this.emitExprInstructions(stmt.value),
+              wasmOp('local.set', `$${tempName}`),
+              ...rawInstructions(condLines),
+              wasmOp('i32.eqz'),
+              wasmOp('br_if', exitLabel),
+              ...rawInstructions(bindLines),
+              ...bodyInstructions,
+              wasmOp('br', loopLabel),
+            ],
+            { label: loopLabel }
+          ),
+        ],
+        { label: exitLabel }
+      ),
+    ];
+  }
+
+  private emitForInstructions(stmt: Extract<LuminaStatement, { type: 'For' }>): WasmTextInstruction[] {
+    if (stmt.iterable.type !== 'Range') {
+      return rawInstructions(this.emitFor(stmt));
+    }
+    const suffix = this.nodeTempSuffix(stmt);
+    const loopLabel = `$for_loop_${suffix}`;
+    const exitLabel = `$for_exit_${suffix}`;
+    const endTemp = this.getForEndTempName(stmt);
+    const instructions: WasmTextInstruction[] = [];
+
+    const startInstructions = stmt.iterable.start ? this.emitExprInstructions(stmt.iterable.start) : [wasmOp('i32.const', 0)];
+    instructions.push(...startInstructions);
+    instructions.push(wasmOp('local.set', `$${stmt.iterator}`));
+
+    if (stmt.iterable.end) {
+      instructions.push(...this.emitExprInstructions(stmt.iterable.end));
+      instructions.push(wasmOp('local.set', `$${endTemp}`));
+    } else {
+      instructions.push(wasmOp('local.get', `$${stmt.iterator}`));
+      instructions.push(wasmOp('local.set', `$${endTemp}`));
+    }
+
+    const previousIterType = this.currentLocalTypes.get(stmt.iterator);
+    this.currentLocalTypes.set(stmt.iterator, { kind: 'primitive', name: 'i32' });
+    const bodyInstructions = this.withLoopLabels(loopLabel, exitLabel, () =>
+      this.emitBlockInstructions(stmt.body.body ?? [], true)
+    );
+    if (previousIterType) this.currentLocalTypes.set(stmt.iterator, previousIterType);
+    else this.currentLocalTypes.delete(stmt.iterator);
+
+    instructions.push(
+      wasmBlock(
+        [
+          wasmLoop(
+            [
+              wasmOp('local.get', `$${stmt.iterator}`),
+              wasmOp('local.get', `$${endTemp}`),
+              wasmOp(stmt.iterable.inclusive ? 'i32.gt_s' : 'i32.ge_s'),
+              wasmOp('br_if', exitLabel),
+              ...bodyInstructions,
+              wasmOp('local.get', `$${stmt.iterator}`),
+              wasmOp('i32.const', 1),
+              wasmOp('i32.add'),
+              wasmOp('local.set', `$${stmt.iterator}`),
+              wasmOp('br', loopLabel),
+            ],
+            { label: loopLabel }
+          ),
+        ],
+        { label: exitLabel }
+      )
+    );
+    return instructions;
+  }
+
+  private emitMatchStmtInstructions(stmt: Extract<LuminaStatement, { type: 'MatchStmt' }>): WasmTextInstruction[] | null {
+    const matchTemp = this.getMatchTempName(stmt);
+    const valueType = typeof stmt.value.id === 'number' ? this.exprTypes.get(stmt.value.id) : undefined;
+    const label = `$match_end_${this.nodeTempSuffix(stmt)}`;
+    const candidateArms = (stmt.arms ?? []).filter((arm) => this.isPatternStaticallyReachable(arm.pattern, valueType));
+    const blockBody: WasmTextInstruction[] = [];
+    let hasFallback = false;
+
+    for (const arm of candidateArms) {
+      const condLines = this.emitPatternConditionFromLocal(arm.pattern, matchTemp, valueType);
+      const bindLines = this.emitPatternBindingsFromLocal(arm.pattern, matchTemp, valueType);
+      if (!condLines || !bindLines) {
+        const lowered = this.emitMatchStmt(stmt) ?? this.emitSimpleEnumMatchStmt(stmt);
+        return lowered ? rawInstructions(lowered) : null;
+      }
+      const thenBody: WasmTextInstruction[] = [...rawInstructions(bindLines)];
+      if (arm.guard) {
+        thenBody.push(...this.emitExprInstructions(arm.guard));
+        thenBody.push(
+          wasmIf([...this.emitBlockInstructions(arm.body.body ?? [], true), wasmOp('br', label)])
+        );
+      } else {
+        thenBody.push(...this.emitBlockInstructions(arm.body.body ?? [], true));
+        thenBody.push(wasmOp('br', label));
+      }
+      blockBody.push(...rawInstructions(condLines));
+      blockBody.push(wasmIf(thenBody));
+      if (arm.pattern.type === 'WildcardPattern' || arm.pattern.type === 'BindingPattern' || arm.pattern.type === 'RefBindingPattern') {
+        hasFallback = true;
+        break;
+      }
+    }
+
+    if (!hasFallback) blockBody.push(wasmOp('unreachable'));
+    return [
+      ...this.emitExprInstructions(stmt.value),
+      wasmOp('local.set', `$${matchTemp}`),
+      wasmBlock(blockBody, { label }),
+    ];
   }
 
   private emitBlock(statements: LuminaStatement[], scoped: boolean = true): string[] {
@@ -2210,6 +3179,10 @@ class WasmBuilder {
     return `__match_expr_${this.nodeTempSuffix(expr)}`;
   }
 
+  private getEnumAllocTempName(node: { location?: Location; id?: number }): string {
+    return `__enum_alloc_${this.nodeTempSuffix(node)}`;
+  }
+
   private getForEndTempName(stmt: Extract<LuminaStatement, { type: 'For' }>): string {
     return `__for_end_${this.nodeTempSuffix(stmt)}`;
   }
@@ -2459,14 +3432,15 @@ class WasmBuilder {
     enumName: string,
     variant: WasmEnumVariantInfo,
     payloadExprs: LuminaExpr[],
-    location?: Location
+    location?: Location,
+    tempName: string = '__enum_tmp'
   ): string[] {
     const lines: string[] = [];
     const slotSize = 8;
     const totalSize = 8 + slotSize * variant.arity;
     lines.push(`i32.const ${totalSize}`);
     lines.push('call $alloc');
-    lines.push('local.tee $__enum_tmp');
+    lines.push(`local.tee $${tempName}`);
     lines.push(`i32.const ${variant.tag}`);
     lines.push('i32.store');
     if (variant.arity !== payloadExprs.length) {
@@ -2476,7 +3450,7 @@ class WasmBuilder {
         'WASM-GADT-001'
       );
       lines.push('unreachable');
-      lines.push('local.get $__enum_tmp');
+      lines.push(`local.get $${tempName}`);
       return lines;
     }
     for (let i = 0; i < variant.arity; i += 1) {
@@ -2490,13 +3464,13 @@ class WasmBuilder {
         lines.push('unreachable');
         continue;
       }
-      lines.push('local.get $__enum_tmp');
+      lines.push(`local.get $${tempName}`);
       lines.push(`i32.const ${8 + i * slotSize}`);
       lines.push('i32.add');
       lines.push(...this.emitExpr(payloadExprs[i]));
       lines.push(this.wasmStoreOp(payloadType));
     }
-    lines.push('local.get $__enum_tmp');
+    lines.push(`local.get $${tempName}`);
     return lines;
   }
 
@@ -2755,7 +3729,7 @@ class WasmBuilder {
           return ['unreachable'];
         }
         if (this.enumUsesHeapRepresentation(enumName)) {
-          return this.emitEnumAlloc(enumName, variantInfo, [], expr.location);
+          return this.emitEnumAlloc(enumName, variantInfo, [], expr.location, this.getEnumAllocTempName(expr));
         }
         return [`i32.const ${variantInfo.tag}`];
       }
@@ -2781,15 +3755,11 @@ class WasmBuilder {
       case 'IsExpr': {
         const enumName = expr.enumName;
         if (!enumName) {
-          throw new Error(
-            `[internal] unreachable IsExpr in WASM codegen: semantic gate (WASM-IS-001) should reject missing enum context`
-          );
+          throw new Error('[internal] unreachable IsExpr in WASM codegen: semantic analysis should resolve enum context before lowering');
         }
         const variantInfo = this.resolveEnumVariantInfo(enumName, expr.variant);
         if (!variantInfo) {
-          throw new Error(
-            `[internal] unreachable IsExpr in WASM codegen: semantic gate (WASM-IS-001) should reject unknown variant '${enumName}.${expr.variant}'`
-          );
+          throw new Error(`[internal] unreachable IsExpr in WASM codegen: semantic analysis should resolve known variant '${enumName}.${expr.variant}'`);
         }
         const valueLines = this.emitExpr(expr.value);
         if (this.enumUsesHeapRepresentation(enumName)) {
@@ -2900,8 +3870,8 @@ class WasmBuilder {
         continue;
       }
       lines.push('local.set $__tmp_i32');
-      lines.push(...partLines);
       lines.push('local.get $__tmp_i32');
+      lines.push(...partLines);
       lines.push('call $str_concat');
     }
     return lines;
@@ -3246,6 +4216,66 @@ class WasmBuilder {
     return lines;
   }
 
+  private getClosureValueType(expr: LuminaExpr): Extract<Type, { kind: 'function' }> | null {
+    const type =
+      (typeof expr.id === 'number' ? this.exprTypes.get(expr.id) : undefined) ??
+      (expr.type === 'Identifier' ? this.currentLocalTypes.get(expr.name) : undefined);
+    if (!type) return null;
+    const pruned = prune(type, this.subst);
+    return pruned.kind === 'function' ? pruned : null;
+  }
+
+  private emitDynamicClosureInvoke(
+    calleeExpr: LuminaExpr,
+    args: LuminaExpr[],
+    location?: Location
+  ): string[] {
+    if (args.length > 5) {
+      this.reportCodegenError(
+        'closure calls with more than 5 arguments are not supported in the current WASM backend',
+        location,
+        'WASM-CLOSURE-001'
+      );
+      return ['i32.const 0'];
+    }
+
+    const fnType = this.getClosureValueType(calleeExpr);
+    if (fnType) {
+      const unsupportedArg = fnType.args.find((argType) => (this.typeToWasm(argType, location) ?? 'i32') !== 'i32');
+      if (unsupportedArg) {
+        this.reportCodegenError(
+          `closure calls with non-i32 arguments are not yet supported in the current WASM backend`,
+          location,
+          'WASM-CLOSURE-001'
+        );
+        return ['i32.const 0'];
+      }
+      const resultWasm = this.typeToWasm(fnType.returnType, location);
+      if (resultWasm && resultWasm !== 'i32') {
+        this.reportCodegenError(
+          `closure calls with ${resultWasm} results are not yet supported in the current WASM backend`,
+          location,
+          'WASM-CLOSURE-001'
+        );
+        return [this.wasmConstZero(resultWasm)];
+      }
+    }
+
+    const lines: string[] = [];
+    lines.push(...this.emitExpr(calleeExpr));
+    for (const arg of args) {
+      const argWasm = this.inferExprWasmType(arg) ?? 'i32';
+      lines.push(...this.emitExpr(arg));
+      if (argWasm === 'f64') {
+        lines.push('i32.trunc_f64_s');
+      } else if (argWasm === 'i64') {
+        lines.push('i32.wrap_i64');
+      }
+    }
+    lines.push(`call $closure_call${args.length}`);
+    return lines;
+  }
+
   private emitOptionFromHasValue(
     hasLines: string[],
     valueLines: string[],
@@ -3581,12 +4611,13 @@ class WasmBuilder {
       return opLines;
     }
     const wasmType = this.typeToWasm(type, expr.location) ?? 'i32';
+    const operandWasmType = this.typeToWasm(leftType ?? rightType, expr.location) ?? wasmType;
     const isUnsigned =
       leftPruned?.kind === 'primitive' &&
       rightPruned?.kind === 'primitive' &&
       isUnsignedTypeName(normalizePrimitiveName(leftPruned.name)) &&
       isUnsignedTypeName(normalizePrimitiveName(rightPruned.name));
-    const op = this.mapBinaryOp(expr.op, wasmType, isUnsigned);
+    const op = this.mapBinaryOp(expr.op, operandWasmType, isUnsigned);
     return [...this.emitExpr(expr.left), ...this.emitExpr(expr.right), op];
   }
 
@@ -3594,17 +4625,14 @@ class WasmBuilder {
     const expectedResultWasm =
       typeof expr.id === 'number' ? this.typeToWasm(this.exprTypes.get(expr.id), expr.location) : null;
     const argValues = expr.args.map((arg) => arg.value);
+    const directCalleeName = expr.callee.type === 'Identifier' ? expr.callee.name : null;
+    const calleeName = directCalleeName ?? expr.callee.name ?? '__computed__';
 
-    if (expr.callee.name === '__invalid__' || expr.callee.name === '__invalid') {
-      this.reportCodegenError(
-        'immediate expression calls must be lowered before WASM codegen (invalid call target)',
-        expr.location,
-        'WASM-EXPR-001'
-      );
-      return ['i32.const 0'];
+    if (!expr.enumName && !expr.receiver && !directCalleeName) {
+      return this.emitDynamicClosureInvoke(expr.callee, argValues, expr.location);
     }
 
-    if (!expr.enumName && !expr.receiver && expr.callee.name === 'cast' && (expr.typeArgs?.length ?? 0) === 1 && argValues.length === 1) {
+    if (!expr.enumName && !expr.receiver && directCalleeName === 'cast' && (expr.typeArgs?.length ?? 0) === 1 && argValues.length === 1) {
       const targetArg = expr.typeArgs?.[0];
       const targetType = normalizeTargetTypeName(typeof targetArg === 'string' ? targetArg : 'any');
       if (targetType === 'string') {
@@ -3619,12 +4647,12 @@ class WasmBuilder {
     }
 
     if (expr.enumName) {
-      const variantInfo = this.resolveEnumVariantInfo(expr.enumName, expr.callee.name);
+      const variantInfo = this.resolveEnumVariantInfo(expr.enumName, calleeName);
       if (variantInfo) {
         const argCount = argValues.length;
         if (variantInfo.arity !== argCount) {
           this.reportCodegenError(
-            `enum constructor '${expr.enumName}.${expr.callee.name}' arity mismatch in WASM backend`,
+            `enum constructor '${expr.enumName}.${calleeName}' arity mismatch in WASM backend`,
             expr.location,
             'WASM-GADT-001'
           );
@@ -3632,29 +4660,29 @@ class WasmBuilder {
         }
         if (variantInfo.arity === 0) {
           if (this.enumUsesHeapRepresentation(expr.enumName)) {
-            return this.emitEnumAlloc(expr.enumName, variantInfo, [], expr.location);
+            return this.emitEnumAlloc(expr.enumName, variantInfo, [], expr.location, this.getEnumAllocTempName(expr));
           }
           return [`i32.const ${variantInfo.tag}`];
         }
-        return this.emitEnumAlloc(expr.enumName, variantInfo, argValues, expr.location);
+        return this.emitEnumAlloc(expr.enumName, variantInfo, argValues, expr.location, this.getEnumAllocTempName(expr));
       }
       if (this.currentLocalTypes.has(expr.enumName)) {
         const dispatched = this.emitReceiverDispatch(
           { type: 'Identifier', name: expr.enumName, location: expr.location },
-          expr.callee.name,
+          calleeName,
           argValues,
           expr.location,
           expectedResultWasm
         );
         if (dispatched) return dispatched;
       }
-      return this.emitNamespacedCall(expr.enumName, expr.callee.name, argValues, expr.location, expectedResultWasm);
+      return this.emitNamespacedCall(expr.enumName, calleeName, argValues, expr.location, expectedResultWasm);
     }
 
     if (expr.receiver) {
       const dispatched = this.emitReceiverDispatch(
         expr.receiver,
-        expr.callee.name,
+        directCalleeName as string,
         argValues,
         expr.location,
         expectedResultWasm
@@ -3663,16 +4691,23 @@ class WasmBuilder {
       return ['unreachable'];
     }
 
-    const boundLambda = this.localLambdaBindings.get(expr.callee.name);
+    const boundLambda = directCalleeName ? this.localLambdaBindings.get(directCalleeName) : undefined;
     if (boundLambda) {
-      return this.emitClosureInvoke(expr.callee.name, boundLambda, argValues);
+      return this.emitClosureInvoke(directCalleeName as string, boundLambda, argValues);
+    }
+
+    if (directCalleeName) {
+      const localType = this.currentLocalTypes.get(directCalleeName);
+      if (localType && prune(localType, this.subst).kind === 'function') {
+        return this.emitDynamicClosureInvoke(expr.callee, argValues, expr.location);
+      }
     }
 
     const args: string[] = [];
     for (const arg of argValues) {
       args.push(...this.emitExpr(arg));
     }
-    args.push(`call $${sanitizeWasmIdent(expr.callee.name)}`);
+    args.push(`call $${sanitizeWasmIdent(directCalleeName as string)}`);
     return args;
   }
 
@@ -3756,7 +4791,7 @@ class WasmBuilder {
         lines.push('call $str_concat');
         return lines;
       }
-      if (callee === 'len' && args.length === 1) {
+      if ((callee === 'len' || callee === 'length') && args.length === 1) {
         emitArgs();
         lines.push('call $str_len');
         return lines;
@@ -3782,7 +4817,19 @@ class WasmBuilder {
         const argType = typeof args[0].id === 'number' ? this.exprTypes.get(args[0].id) : undefined;
         const argWasm = this.typeToWasm(argType, location) ?? 'i32';
         emitArgs();
-        lines.push(argWasm === 'f64' ? 'call $abs_float' : 'call $abs_int');
+        if (argWasm === 'f64') {
+          lines.push('f64.abs');
+          return lines;
+        }
+        lines.push('local.tee $__tmp_i32');
+        lines.push('i32.const 31');
+        lines.push('i32.shr_s');
+        lines.push('local.set $__tmp_i32_b');
+        lines.push('local.get $__tmp_i32');
+        lines.push('local.get $__tmp_i32_b');
+        lines.push('i32.xor');
+        lines.push('local.get $__tmp_i32_b');
+        lines.push('i32.sub');
         return lines;
       }
     }
@@ -3826,6 +4873,10 @@ class WasmBuilder {
       if (callee === 'push' && args.length === 2) {
         emitArgs();
         lines.push('call $vec_push');
+        if (expectedResultWasm === null) {
+          lines.push('drop');
+          return lines;
+        }
         return lines;
       }
       if (callee === 'clear' && args.length === 1) {
@@ -3908,9 +4959,41 @@ class WasmBuilder {
         return lines;
       }
       if (callee === 'insert' && args.length === 3) {
-        const hasLines = [...this.emitExpr(args[0]), ...this.emitExpr(args[1]), ...this.emitExpr(args[2]), 'call $hashmap_insert_has'];
-        const valueLines = [...this.emitExpr(args[0]), ...this.emitExpr(args[1]), ...this.emitExpr(args[2]), 'call $hashmap_insert_prev'];
-        return this.emitOptionFromHasValue(hasLines, valueLines);
+        const optionLines: string[] = [];
+        optionLines.push(...this.emitExpr(args[0]), ...this.emitExpr(args[1]), ...this.emitExpr(args[2]), 'call $hashmap_insert_has');
+        optionLines.push('local.set $__tmp_i32_b');
+        optionLines.push(
+          ...this.emitExpr(args[0]),
+          ...this.emitExpr(args[1]),
+          ...this.emitExpr(args[2]),
+          'call $hashmap_insert_prev'
+        );
+        optionLines.push('local.set $__tmp_i32');
+        optionLines.push('local.get $__tmp_i32_b');
+        optionLines.push('(if (result i32)');
+        optionLines.push('  (then');
+        optionLines.push('    i32.const 16');
+        optionLines.push('    call $alloc');
+        optionLines.push('    local.tee $__enum_tmp');
+        optionLines.push('    i32.const 0');
+        optionLines.push('    i32.store');
+        optionLines.push('    local.get $__enum_tmp');
+        optionLines.push('    i32.const 8');
+        optionLines.push('    i32.add');
+        optionLines.push('    local.get $__tmp_i32');
+        optionLines.push('    i32.store');
+        optionLines.push('    local.get $__enum_tmp');
+        optionLines.push('  )');
+        optionLines.push('  (else');
+        optionLines.push('    i32.const 8');
+        optionLines.push('    call $alloc');
+        optionLines.push('    local.tee $__enum_tmp');
+        optionLines.push('    i32.const 1');
+        optionLines.push('    i32.store');
+        optionLines.push('    local.get $__enum_tmp');
+        optionLines.push('  )');
+        optionLines.push(')');
+        return optionLines;
       }
       if (callee === 'get' && args.length === 2) {
         const hasLines = [...this.emitExpr(args[0]), ...this.emitExpr(args[1]), 'call $hashmap_get_has'];

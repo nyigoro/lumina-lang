@@ -473,9 +473,10 @@ function lowerExpr(expr: LuminaExpr, ctx: LowerContext): IRNode {
     case 'Binary': {
       if (expr.op === '|>') {
         if (expr.right.type === 'Call') {
+          const callNameBase = expr.right.callee.name ?? '<computed>';
           const calleeName = expr.right.enumName
-            ? `${expr.right.enumName}.${expr.right.callee.name}`
-            : expr.right.callee.name;
+            ? `${expr.right.enumName}.${callNameBase}`
+            : callNameBase;
           const call: IRCall = {
             kind: 'Call',
             callee: calleeName,
@@ -497,7 +498,8 @@ function lowerExpr(expr: LuminaExpr, ctx: LowerContext): IRNode {
     }
     case 'Call': {
       const argValues = expr.args.map((arg) => arg.value);
-      if (!expr.enumName && !expr.receiver && expr.callee.name === 'cast' && expr.typeArgs && expr.typeArgs.length === 1 && expr.args.length === 1) {
+      const calleeName = expr.callee.name ?? '<computed>';
+      if (!expr.enumName && !expr.receiver && calleeName === 'cast' && expr.typeArgs && expr.typeArgs.length === 1 && expr.args.length === 1) {
         const targetType = normalizeLowerCastTarget(lowerTypeArgToText(expr.typeArgs[0]));
         if (targetType === 'string') {
           return {
@@ -515,8 +517,8 @@ function lowerExpr(expr: LuminaExpr, ctx: LowerContext): IRNode {
         };
       }
       const variant = expr.enumName
-        ? ctx.variantsByQualified.get(`${expr.enumName}.${expr.callee.name}`)
-        : ctx.variantsByName.get(expr.callee.name);
+        ? ctx.variantsByQualified.get(`${expr.enumName}.${calleeName}`)
+        : ctx.variantsByName.get(calleeName);
       if (variant) {
         const enumNode: IREnumConstruct = {
           kind: 'Enum',
@@ -528,7 +530,7 @@ function lowerExpr(expr: LuminaExpr, ctx: LowerContext): IRNode {
       }
       const call: IRCall = {
         kind: 'Call',
-        callee: expr.enumName ? `${expr.enumName}.${expr.callee.name}` : expr.callee.name,
+        callee: expr.enumName ? `${expr.enumName}.${calleeName}` : calleeName,
         args: argValues.map((arg) => lowerExpr(arg, ctx)),
         location: expr.location,
       };

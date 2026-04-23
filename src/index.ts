@@ -5,6 +5,7 @@
 
 // 🧠 Grammar Compilation
 export {
+  clearCompiledGrammarCache,
   compileGrammar,
   type CompiledGrammar,
 } from './grammar/index';
@@ -90,7 +91,8 @@ export { analyzeLumina, SymbolTable as LuminaSymbolTable } from './lumina/semant
 export { lowerLumina } from './lumina/lower';
 export { generateJS } from './lumina/codegen';
 export { generateJSFromAst } from './lumina/codegen-js';
-export { generateWATFromAst } from './lumina/codegen-wasm';
+export { generateWATFromAst, generateWasmTextModuleFromAst } from './lumina/codegen-wasm';
+export { emitWasmBinary } from './lumina/wasm-emit-binary';
 export type { IRNode } from './lumina/ir';
 export { optimizeIR } from './lumina/optimize';
 export { irToDot } from './lumina/ir-dot';

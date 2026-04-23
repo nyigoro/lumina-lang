@@ -1,80 +1,12 @@
 (module
-  (import "env" "print_int" (func $print_int (param i32)))
-  (import "env" "print_float" (func $print_float (param f64)))
-  (import "env" "print_bool" (func $print_bool (param i32)))
-  (import "env" "print_string" (func $print_string (param i32)))
-  (import "env" "print_i64" (func $print_i64 (param i64)))
-  (import "env" "abs_int" (func $abs_int (param i32) (result i32)))
-  (import "env" "abs_float" (func $abs_float (param f64) (result f64)))
-  (import "env" "str_new" (func $str_new (param i32 i32) (result i32)))
-  (import "env" "str_concat" (func $str_concat (param i32 i32) (result i32)))
-  (import "env" "str_len" (func $str_len (param i32) (result i32)))
-  (import "env" "str_slice" (func $str_slice (param i32 i32 i32 i32) (result i32)))
-  (import "env" "str_eq" (func $str_eq (param i32 i32) (result i32)))
-  (import "env" "str_from_int" (func $str_from_int (param i32) (result i32)))
-  (import "env" "str_from_i64" (func $str_from_i64 (param i64) (result i32)))
-  (import "env" "str_from_u64" (func $str_from_u64 (param i64) (result i32)))
-  (import "env" "str_from_float" (func $str_from_float (param f64) (result i32)))
-  (import "env" "str_from_bool" (func $str_from_bool (param i32) (result i32)))
-  (import "env" "str_from_handle" (func $str_from_handle (param i32) (result i32)))
-  (import "env" "promise_resolve_i32" (func $promise_resolve_i32 (param i32) (result i32)))
-  (import "env" "promise_resolve_i64" (func $promise_resolve_i64 (param i64) (result i32)))
-  (import "env" "promise_resolve_f64" (func $promise_resolve_f64 (param f64) (result i32)))
-  (import "env" "promise_await_i32" (func $promise_await_i32 (param i32) (result i32)))
-  (import "env" "promise_await_i64" (func $promise_await_i64 (param i32) (result i64)))
-  (import "env" "promise_await_f64" (func $promise_await_f64 (param i32) (result f64)))
-  (import "env" "promise_is_ready" (func $promise_is_ready (param i32) (result i32)))
-  (import "env" "promise_select_first_ready" (func $promise_select_first_ready (param i32 i32) (result i32)))
-  (import "env" "module_call0" (func $module_call0 (param i32 i32) (result i32)))
-  (import "env" "module_call1" (func $module_call1 (param i32 i32 i32) (result i32)))
-  (import "env" "module_call2" (func $module_call2 (param i32 i32 i32 i32) (result i32)))
-  (import "env" "module_call3" (func $module_call3 (param i32 i32 i32 i32 i32) (result i32)))
-  (import "env" "module_call4" (func $module_call4 (param i32 i32 i32 i32 i32 i32) (result i32)))
-  (import "env" "module_call5" (func $module_call5 (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
-  (import "env" "module_call_ptr" (func $module_call_ptr (param i32 i32 i32 i32) (result i32)))
-  (import "env" "mem_retain" (func $mem_retain (param i32)))
-  (import "env" "mem_release" (func $mem_release (param i32)))
-  (import "env" "mem_stats_live" (func $mem_stats_live (result i32)))
-  (import "env" "vec_new" (func $vec_new (result i32)))
-  (import "env" "vec_len" (func $vec_len (param i32) (result i32)))
-  (import "env" "vec_push" (func $vec_push (param i32 i32) (result i32)))
-  (import "env" "vec_get_has" (func $vec_get_has (param i32 i32) (result i32)))
-  (import "env" "vec_get" (func $vec_get (param i32 i32) (result i32)))
-  (import "env" "vec_pop_has" (func $vec_pop_has (param i32) (result i32)))
-  (import "env" "vec_pop" (func $vec_pop (param i32) (result i32)))
-  (import "env" "vec_clear" (func $vec_clear (param i32)))
-  (import "env" "vec_take" (func $vec_take (param i32 i32) (result i32)))
-  (import "env" "vec_skip" (func $vec_skip (param i32 i32) (result i32)))
-  (import "env" "vec_any_closure" (func $vec_any_closure (param i32 i32) (result i32)))
-  (import "env" "vec_all_closure" (func $vec_all_closure (param i32 i32) (result i32)))
-  (import "env" "vec_map_closure" (func $vec_map_closure (param i32 i32) (result i32)))
-  (import "env" "vec_filter_closure" (func $vec_filter_closure (param i32 i32) (result i32)))
-  (import "env" "vec_fold_closure" (func $vec_fold_closure (param i32 i32 i32) (result i32)))
-  (import "env" "vec_find_has" (func $vec_find_has (param i32 i32) (result i32)))
-  (import "env" "vec_find" (func $vec_find (param i32 i32) (result i32)))
-  (import "env" "vec_position" (func $vec_position (param i32 i32) (result i32)))
-  (import "env" "hashmap_new" (func $hashmap_new (result i32)))
-  (import "env" "hashmap_len" (func $hashmap_len (param i32) (result i32)))
-  (import "env" "hashmap_insert_has" (func $hashmap_insert_has (param i32 i32 i32) (result i32)))
-  (import "env" "hashmap_insert_prev" (func $hashmap_insert_prev (param i32 i32 i32) (result i32)))
-  (import "env" "hashmap_get_has" (func $hashmap_get_has (param i32 i32) (result i32)))
-  (import "env" "hashmap_get" (func $hashmap_get (param i32 i32) (result i32)))
-  (import "env" "hashmap_remove_has" (func $hashmap_remove_has (param i32 i32) (result i32)))
-  (import "env" "hashmap_remove" (func $hashmap_remove (param i32 i32) (result i32)))
-  (import "env" "hashmap_contains_key" (func $hashmap_contains_key (param i32 i32) (result i32)))
-  (import "env" "hashmap_clear" (func $hashmap_clear (param i32)))
-  (import "env" "hashset_new" (func $hashset_new (result i32)))
-  (import "env" "hashset_len" (func $hashset_len (param i32) (result i32)))
-  (import "env" "hashset_insert" (func $hashset_insert (param i32 i32) (result i32)))
-  (import "env" "hashset_contains" (func $hashset_contains (param i32 i32) (result i32)))
-  (import "env" "hashset_remove" (func $hashset_remove (param i32 i32) (result i32)))
-  (import "env" "hashset_clear" (func $hashset_clear (param i32)))
+  (import "env" "str_new" (func $str_new (param i32) (param i32) (result i32)))
+  (import "env" "str_concat" (func $str_concat (param i32) (param i32) (result i32)))
+  (import "env" "str_eq" (func $str_eq (param i32) (param i32) (result i32)))
   (memory (export "memory") 1)
   (global $heap_ptr (mut i32) (i32.const 4096))
   (global $free_head (mut i32) (i32.const 0))
   (func $__ensure_capacity (param $needed_end i32)
-    (local $current_bytes i32)
-    (local $required_pages i32)
+  (local $current_bytes i32) (local $required_pages i32)
     memory.size
     i32.const 65536
     i32.mul
@@ -97,13 +29,7 @@
     end
   )
   (func $alloc (param $size i32) (result i32)
-    (local $aligned i32)
-    (local $block i32)
-    (local $prev i32)
-    (local $curr i32)
-    (local $curr_size i32)
-    (local $next i32)
-    (local $needed_end i32)
+  (local $aligned i32) (local $block i32) (local $prev i32) (local $curr i32) (local $curr_size i32) (local $next i32) (local $needed_end i32)
     local.get $size
     i32.const 7
     i32.add
@@ -189,7 +115,7 @@
     i32.add
   )
   (func $free (param $ptr i32)
-    (local $block i32)
+  (local $block i32)
     local.get $ptr
     i32.eqz
     if
@@ -210,7 +136,7 @@
   ;; Struct User
   ;; Total size: 4 bytes
   (func $User_new (param $name i32) (result i32)
-    (local $__struct_ptr i32)
+  (local $__struct_ptr i32)
     i32.const 4
     call $alloc
     local.set $__struct_ptr
@@ -220,8 +146,8 @@
     local.get $__struct_ptr
   )
   ;;   field name: offset 0, size 4, align 4
-  (func $main  (result i32)
-  (local $__enum_tmp i32) (local $__tmp_i32 i32) (local $__slice_obj i32) (local $__slice_start i32) (local $__slice_end i32) (local $__slice_count i32) (local $__slice_result i32) (local $__slice_idx i32) (local $u i32)
+  (func $main (result i32)
+  (local $__enum_tmp i32) (local $__tmp_i32 i32) (local $__tmp_i32_b i32) (local $__slice_obj i32) (local $__slice_start i32) (local $__slice_end i32) (local $__slice_count i32) (local $__slice_result i32) (local $__slice_idx i32) (local $u i32)
     i32.const 32
     i32.const 1
     call $str_new
@@ -233,21 +159,18 @@
     i32.const 3
     call $str_new
     call $str_eq
-    (if
-      (then
-        i32.const 1
-        return
-      )
-      (else
-        i32.const 0
-        return
-      )
-    )
+    if
+      i32.const 1
+      return
+    else
+      i32.const 0
+      return
+    end
     i32.const 0
     return
   )
   (func $Printable_User_print (param $self i32) (result i32)
-  (local $__enum_tmp i32) (local $__tmp_i32 i32) (local $__slice_obj i32) (local $__slice_start i32) (local $__slice_end i32) (local $__slice_count i32) (local $__slice_result i32) (local $__slice_idx i32)
+  (local $__enum_tmp i32) (local $__tmp_i32 i32) (local $__tmp_i32_b i32) (local $__slice_obj i32) (local $__slice_start i32) (local $__slice_end i32) (local $__slice_count i32) (local $__slice_result i32) (local $__slice_idx i32)
     i32.const 38
     i32.const 2
     call $str_new

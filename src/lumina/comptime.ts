@@ -552,20 +552,21 @@ const evalExpr = (
       return { ok: true, value: object.value.elements[index] };
     }
     case 'Call': {
+      const calleeName = expr.callee.name ?? '<computed>';
       if (expr.receiver || expr.enumName) {
         return makeError(
           'not_comptime',
           fnName,
-          `Runtime call '${expr.enumName ? `${expr.enumName}.` : ''}${expr.callee.name}' is not allowed in comptime`,
+          `Runtime call '${expr.enumName ? `${expr.enumName}.` : ''}${calleeName}' is not allowed in comptime`,
           expr.location
         );
       }
-      const entry = ctx.registry.fns.get(expr.callee.name);
+      const entry = ctx.registry.fns.get(calleeName);
       if (!entry) {
         return makeError(
           'not_comptime',
           fnName,
-          `Call to non-comptime function '${expr.callee.name}'`,
+          `Call to non-comptime function '${calleeName}'`,
           expr.location
         );
       }
@@ -735,21 +736,22 @@ const validateComptimeFn = (entry: ComptimeFnEntry, registry: ComptimeFnRegistry
 
   const validateExpr = (expr: LuminaExpr): void => {
     switch (expr.type) {
-      case 'Call':
+      case 'Call': {
+        const calleeName = expr.callee.name ?? '<computed>';
         if (expr.receiver || expr.enumName) {
           errors.push({
             kind: 'not_comptime',
             fnName: entry.name,
-            message: `Runtime member call '${expr.enumName ? `${expr.enumName}.` : ''}${expr.callee.name}' is not allowed in comptime`,
+            message: `Runtime member call '${expr.enumName ? `${expr.enumName}.` : ''}${calleeName}' is not allowed in comptime`,
             location: expr.location,
           });
         } else {
-          const dep = registry.fns.get(expr.callee.name);
+          const dep = registry.fns.get(calleeName);
           if (!dep) {
             errors.push({
               kind: 'not_comptime',
               fnName: entry.name,
-              message: `Call to non-comptime function '${expr.callee.name}'`,
+              message: `Call to non-comptime function '${calleeName}'`,
               location: expr.location,
             });
           } else {
@@ -759,6 +761,7 @@ const validateComptimeFn = (entry: ComptimeFnEntry, registry: ComptimeFnRegistry
         if (expr.receiver) validateExpr(expr.receiver);
         for (const arg of expr.args ?? []) validateExpr(arg.value);
         return;
+      }
       case 'Binary':
         validateExpr(expr.left);
         validateExpr(expr.right);
@@ -966,7 +969,7 @@ const substituteComptimeCalls = (
       blocked,
       stack: [],
     };
-    return evalExpr(call as LuminaExpr, env, ctx, call.callee.name);
+    return evalExpr(call as LuminaExpr, env, ctx, call.callee.name ?? '<computed>');
   };
 
   const substituted = { n: 0 };
@@ -1058,7 +1061,7 @@ const substituteComptimeCalls = (
 
     if (transformed.type !== 'Call') return transformed;
     if (transformed.receiver || transformed.enumName) return transformed;
-    if (!registry.fns.has(transformed.callee.name)) return transformed;
+    if (!transformed.callee.name || !registry.fns.has(transformed.callee.name)) return transformed;
 
     const result = evalCallExpr(transformed);
     if (!result.ok) {

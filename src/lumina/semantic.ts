@@ -4,6 +4,7 @@ import {
   type LuminaProgram,
   type LuminaStatement,
   type LuminaExpr,
+  type LuminaAttribute,
   type LuminaType,
   type LuminaTypeExpr,
   type LuminaTypeHole,
@@ -14,6 +15,7 @@ import {
   type LuminaBlock,
   type LuminaLambda,
   type LuminaArg,
+  getCallCalleeName,
 } from './ast.js';
 import { inferProgram } from './hm-infer.js';
 import { normalizeDiagnostic } from './diagnostics-util.js';
@@ -45,6 +47,14 @@ import {
   type ModuleRegistry,
 } from './module-registry.js';
 import { mangleTraitMethodName, type TraitMethodResolution } from './trait-utils.js';
+import {
+  getCapabilityMetadataForExport,
+  normalizeTargetProfile,
+  TARGET_PROFILES,
+  type AnalyzeTarget,
+  type LuminaCapability,
+  type LuminaHostCapability,
+} from './target-profiles.js';
 
 export type SymbolKind = 'type' | 'function' | 'variable';
 
@@ -718,7 +728,7 @@ export interface AnalyzeOptions {
   traitRegistry?: TraitRegistry;
   traitMethodResolutions?: Map<number, TraitMethodResolution>;
   stopOnUnresolvedMemberError?: boolean;
-  target?: 'cjs' | 'esm' | 'wasm';
+  target?: AnalyzeTarget;
 }
 
 class StopOnUnresolvedMemberError extends Error {}
@@ -1061,8 +1071,407 @@ export function analyzeLumina(program: LuminaProgram, options?: AnalyzeOptions) 
   }
 
   collectUnusedBindingsLocal(rootScope, diagnostics, program.location);
+  runCapabilityValidationPass(program, activeOptions, diagnostics);
 
   return { symbols, diagnostics, diGraphs: options?.diDebug ? diGraphs : undefined, hmCallSignatures, hmExprTypes, traitRegistry, traitMethodResolutions };
+}
+
+type CapabilityRequirement = {
+  capabilities: Set<LuminaCapability>;
+  hostCapabilities: Set<LuminaHostCapability>;
+};
+
+type FunctionCapabilityInfo = {
+  stmt: LuminaFnDecl;
+  declared: CapabilityRequirement;
+  direct: CapabilityRequirement;
+  required: CapabilityRequirement;
+  calls: Set<string>;
+  shouldCheckLeak: boolean;
+};
+
+function createCapabilityRequirement(): CapabilityRequirement {
+  return {
+    capabilities: new Set<LuminaCapability>(),
+    hostCapabilities: new Set<LuminaHostCapability>(),
+  };
+}
+
+function hasCapabilityRequirement(requirement: CapabilityRequirement): boolean {
+  return requirement.capabilities.size > 0 || requirement.hostCapabilities.size > 0;
+}
+
+function mergeCapabilityRequirement(
+  target: CapabilityRequirement,
+  source: CapabilityRequirement
+): boolean {
+  let changed = false;
+  for (const capability of source.capabilities) {
+    if (!target.capabilities.has(capability)) {
+      target.capabilities.add(capability);
+      changed = true;
+    }
+  }
+  for (const hostCapability of source.hostCapabilities) {
+    if (!target.hostCapabilities.has(hostCapability)) {
+      target.hostCapabilities.add(hostCapability);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function cloneCapabilityRequirement(source: CapabilityRequirement): CapabilityRequirement {
+  const next = createCapabilityRequirement();
+  mergeCapabilityRequirement(next, source);
+  return next;
+}
+
+function parseDeclaredCapabilityRequirement(
+  attributes: LuminaAttribute[] | undefined,
+  diagnostics: Diagnostic[],
+  location?: Location
+): CapabilityRequirement {
+  const requirement = createCapabilityRequirement();
+  for (const attribute of attributes ?? []) {
+    if (attribute.name !== 'capability') continue;
+    for (const rawArg of attribute.args ?? []) {
+      const value = rawArg.trim();
+      if (value === 'core' || value === 'web' || value === 'reactive' || value === 'render' || value === 'wasi') {
+        requirement.capabilities.add(value);
+        continue;
+      }
+      if (
+        value === 'web.dom' ||
+        value === 'web.storage' ||
+        value === 'web.history' ||
+        value === 'web.worker' ||
+        value === 'web.streams' ||
+        value === 'web.fetch' ||
+        value === 'web.gpu' ||
+        value === 'wasi.fs' ||
+        value === 'wasi.io' ||
+        value === 'wasi.env' ||
+        value === 'wasi.process'
+      ) {
+        requirement.hostCapabilities.add(value);
+        if (value.startsWith('web.')) requirement.capabilities.add('web');
+        if (value.startsWith('wasi.')) requirement.capabilities.add('wasi');
+        continue;
+      }
+      diagnostics.push(
+        diagAt(
+          `Unknown capability '${value}' in #[capability(...)]`,
+          attribute.location ?? location,
+          'error',
+          'CAP-ATTR-001'
+        )
+      );
+    }
+  }
+  return requirement;
+}
+
+function formatCapabilityList(values: Iterable<string>): string {
+  return Array.from(new Set(values)).sort().join(', ');
+}
+
+function runCapabilityValidationPass(
+  program: LuminaProgram,
+  options: AnalyzeOptions | undefined,
+  diagnostics: Diagnostic[]
+): void {
+  const targetProfile = TARGET_PROFILES[normalizeTargetProfile(options?.target)];
+  const moduleBindings = options?.moduleBindings ?? new Map<string, ModuleExport>();
+  const functionInfos = new Map<string, FunctionCapabilityInfo>();
+  const knownFunctionNames = new Set<string>();
+
+  for (const stmt of program.body) {
+    if (stmt.type === 'FnDecl') {
+      knownFunctionNames.add(stmt.name);
+    }
+  }
+
+  const addModuleRequirement = (
+    requirement: CapabilityRequirement,
+    binding: ModuleExport | undefined,
+    member?: string
+  ) => {
+    const metadata = getCapabilityMetadataForExport(binding, member);
+    for (const capability of metadata.capabilities) requirement.capabilities.add(capability);
+    for (const hostCapability of metadata.hostCapabilities) requirement.hostCapabilities.add(hostCapability);
+  };
+
+  const collectDirectFunctionRequirement = (stmt: LuminaFnDecl): FunctionCapabilityInfo => {
+    const declared = parseDeclaredCapabilityRequirement(stmt.attributes, diagnostics, stmt.location);
+    const direct = cloneCapabilityRequirement(declared);
+    const calls = new Set<string>();
+    const capabilitySignal =
+      hasCapabilityRequirement(declared) ||
+      (stmt.attributes ?? []).some((attribute) => attribute.name === 'capability');
+
+    const visitExpr = (expr: LuminaExpr | null | undefined): void => {
+      if (!expr) return;
+      if (expr.type === 'Identifier') {
+        const binding = moduleBindings.get(expr.name);
+        if (binding && binding.kind !== 'module') {
+          addModuleRequirement(direct, binding);
+        }
+        return;
+      }
+      if (expr.type === 'Member') {
+        if (expr.object.type === 'Identifier') {
+          const binding = moduleBindings.get(expr.object.name);
+          if (binding) {
+            addModuleRequirement(direct, binding, expr.property);
+          }
+        }
+        visitExpr(expr.object);
+        return;
+      }
+      if (expr.type === 'Call') {
+        const callee = getCallCalleeName(expr);
+        if (expr.receiver?.type === 'Identifier') {
+          addModuleRequirement(direct, moduleBindings.get(expr.receiver.name), callee ?? undefined);
+        } else if (expr.enumName) {
+          addModuleRequirement(direct, moduleBindings.get(expr.enumName), callee ?? undefined);
+        } else if (callee) {
+          const binding = moduleBindings.get(callee);
+          if (binding) {
+            addModuleRequirement(direct, binding);
+          } else if (knownFunctionNames.has(callee)) {
+            calls.add(callee);
+          }
+        }
+        if (!expr.receiver && !expr.enumName && !callee) {
+          visitExpr(expr.callee);
+        }
+        if (expr.receiver) visitExpr(expr.receiver);
+        for (const arg of expr.args ?? []) visitExpr(arg.value);
+        return;
+      }
+      if (expr.type === 'Lambda') {
+        visitStatement(expr.body);
+        for (const param of expr.params ?? []) {
+          if (param.defaultValue) visitExpr(param.defaultValue);
+        }
+        return;
+      }
+      if (expr.type === 'MatchExpr') {
+        visitExpr(expr.value);
+        for (const arm of expr.arms ?? []) {
+          if (arm.guard) visitExpr(arm.guard);
+          visitExpr(arm.body);
+        }
+        return;
+      }
+      if (expr.type === 'SelectExpr') {
+        for (const arm of expr.arms ?? []) {
+          visitExpr(arm.value);
+          visitExpr(arm.body);
+        }
+        return;
+      }
+      if (expr.type === 'StructLiteral') {
+        for (const field of expr.fields ?? []) visitExpr(field.value);
+        return;
+      }
+      if (expr.type === 'InterpolatedString') {
+        for (const part of expr.parts ?? []) {
+          if (typeof part !== 'string') visitExpr(part);
+        }
+        return;
+      }
+      if (expr.type === 'ArrayLiteral') {
+        for (const element of expr.elements ?? []) visitExpr(element);
+        return;
+      }
+      if (expr.type === 'ArrayRepeatLiteral') {
+        visitExpr(expr.value);
+        visitExpr(expr.count);
+        return;
+      }
+      if (expr.type === 'TupleLiteral') {
+        for (const element of expr.elements ?? []) visitExpr(element);
+        return;
+      }
+      if (expr.type === 'Index') {
+        visitExpr(expr.object);
+        visitExpr(expr.index);
+        return;
+      }
+      if (expr.type === 'Range') {
+        visitExpr(expr.start);
+        visitExpr(expr.end);
+        return;
+      }
+      if (expr.type === 'Binary') {
+        visitExpr(expr.left);
+        visitExpr(expr.right);
+        return;
+      }
+      if (expr.type === 'Await' || expr.type === 'Try') {
+        visitExpr(expr.value);
+        return;
+      }
+      if (expr.type === 'Move') {
+        if (expr.target.type === 'Member') visitExpr(expr.target.object);
+        return;
+      }
+      if (expr.type === 'Cast') {
+        visitExpr(expr.expr);
+        return;
+      }
+    };
+
+    const visitStatement = (statement: LuminaStatement | null | undefined): void => {
+      if (!statement) return;
+      switch (statement.type) {
+        case 'Block':
+          for (const child of statement.body ?? []) visitStatement(child);
+          return;
+        case 'FnDecl':
+          for (const param of statement.params ?? []) {
+            if (param.defaultValue) visitExpr(param.defaultValue);
+          }
+          visitStatement(statement.body);
+          return;
+        case 'Let':
+          visitExpr(statement.value);
+          return;
+        case 'LetTuple':
+          visitExpr(statement.value);
+          return;
+        case 'LetElse':
+          visitExpr(statement.value);
+          visitStatement(statement.elseBlock);
+          return;
+        case 'Return':
+          visitExpr(statement.value);
+          return;
+        case 'ExprStmt':
+          visitExpr(statement.expr);
+          return;
+        case 'Assign':
+          visitExpr(statement.value);
+          if (statement.target.type === 'Member') visitExpr(statement.target.object);
+          return;
+        case 'If':
+          visitExpr(statement.condition);
+          visitStatement(statement.thenBlock);
+          if (statement.elseBlock) visitStatement(statement.elseBlock);
+          return;
+        case 'IfLet':
+          visitExpr(statement.value);
+          visitStatement(statement.thenBlock);
+          if (statement.elseBlock) visitStatement(statement.elseBlock);
+          return;
+        case 'While':
+          visitExpr(statement.condition);
+          visitStatement(statement.body);
+          return;
+        case 'WhileLet':
+          visitExpr(statement.value);
+          visitStatement(statement.body);
+          return;
+        case 'For':
+          visitExpr(statement.iterable);
+          visitStatement(statement.body);
+          return;
+        case 'MatchStmt':
+          visitExpr(statement.value);
+          for (const arm of statement.arms ?? []) {
+            if (arm.guard) visitExpr(arm.guard);
+            visitStatement(arm.body);
+          }
+          return;
+        default:
+          return;
+      }
+    };
+
+    visitStatement(stmt.body);
+
+    return {
+      stmt,
+      declared,
+      direct,
+      required: cloneCapabilityRequirement(direct),
+      calls,
+      shouldCheckLeak: capabilitySignal || Array.from(calls).some((name) => {
+        const callee = functionInfos.get(name);
+        return callee ? hasCapabilityRequirement(callee.declared) : false;
+      }),
+    };
+  };
+
+  for (const stmt of program.body) {
+    if (stmt.type !== 'FnDecl') continue;
+    functionInfos.set(stmt.name, collectDirectFunctionRequirement(stmt));
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const info of functionInfos.values()) {
+      for (const calleeName of info.calls) {
+        const callee = functionInfos.get(calleeName);
+        if (!callee) continue;
+        if (hasCapabilityRequirement(callee.declared)) info.shouldCheckLeak = true;
+        if (mergeCapabilityRequirement(info.required, callee.required)) {
+          changed = true;
+        }
+      }
+    }
+  }
+
+  for (const info of functionInfos.values()) {
+    for (const capability of Array.from(info.required.capabilities).sort()) {
+      if (!targetProfile.allowedCapabilities.includes(capability)) {
+        diagnostics.push(
+          diagAt(
+            `Capability '${capability}' not available in target '${targetProfile.name}'`,
+            info.stmt.location,
+            'error',
+            'CAP-001'
+          )
+        );
+      }
+    }
+    for (const hostCapability of Array.from(info.required.hostCapabilities).sort()) {
+      const broadCapability = hostCapability.startsWith('web.') ? 'web' : 'wasi';
+      if (
+        targetProfile.allowedCapabilities.includes(broadCapability) &&
+        !targetProfile.hostCapabilities.includes(hostCapability)
+      ) {
+        diagnostics.push(
+          diagAt(
+            `Host capability '${hostCapability}' not available in target '${targetProfile.name}'`,
+            info.stmt.location,
+            'error',
+            'CAP-002'
+          )
+        );
+      }
+    }
+    if (info.stmt.visibility !== 'public' || !info.shouldCheckLeak) continue;
+    const leakedCapabilities = Array.from(info.required.capabilities).filter(
+      (capability) => !info.declared.capabilities.has(capability)
+    );
+    const leakedHostCapabilities = Array.from(info.required.hostCapabilities).filter(
+      (hostCapability) => !info.declared.hostCapabilities.has(hostCapability)
+    );
+    if (leakedCapabilities.length === 0 && leakedHostCapabilities.length === 0) continue;
+    const leaked = formatCapabilityList([...leakedCapabilities, ...leakedHostCapabilities]);
+    diagnostics.push(
+      diagAt(
+        `Public function '${info.stmt.name}' leaks undeclared capability requirements: ${leaked}`,
+        info.stmt.location,
+        'error',
+        'CAP-003'
+      )
+    );
+  }
 }
 
 function reportAdvancedTypeFeatureDiagnostics(program: LuminaProgram, diagnostics: Diagnostic[]): void {
@@ -2101,21 +2510,22 @@ function validateComptimeFunctionBindings(
         return;
       }
       case 'Call': {
+        const calleeName = expr.callee.name ?? '<computed>';
         if (expr.receiver || expr.enumName) {
           diagnostics.push(
             diagAt(
-              `comptime fn '${fnDecl.name}' cannot call runtime member '${expr.enumName ? `${expr.enumName}.` : ''}${expr.callee.name}'`,
+              `comptime fn '${fnDecl.name}' cannot call runtime member '${expr.enumName ? `${expr.enumName}.` : ''}${calleeName}'`,
               expr.location ?? fnDecl.location,
               'error',
               'COMPTIME-RUNTIME-CALL'
             )
           );
         } else {
-          const calleeSym = symbols.get(expr.callee.name) ?? options?.externSymbols?.(expr.callee.name);
+          const calleeSym = symbols.get(calleeName) ?? options?.externSymbols?.(calleeName);
           if (calleeSym?.kind === 'function' && !calleeSym.comptime) {
             diagnostics.push(
               diagAt(
-                `comptime fn '${fnDecl.name}' cannot call non-comptime function '${expr.callee.name}'`,
+                `comptime fn '${fnDecl.name}' cannot call non-comptime function '${calleeName}'`,
                 expr.location ?? fnDecl.location,
                 'error',
                 'COMPTIME-NON-COMPTIME-CALL'
@@ -2716,9 +3126,11 @@ function getNarrowingFromCondition(
 
   const tryMatch = (left: LuminaExpr, right: LuminaExpr, when: 'then' | 'else') => {
     if (left.type !== 'Identifier' || right.type !== 'Call') return null;
+    const calleeName = right.callee.name;
+    if (!calleeName) return null;
     const payloadType = right.enumName
-      ? getEnumPayloadTypeQualified(symbols, right.enumName, right.callee.name, options)
-      : getEnumPayloadType(symbols, right.callee.name, options);
+      ? getEnumPayloadTypeQualified(symbols, right.enumName, calleeName, options)
+      : getEnumPayloadType(symbols, calleeName, options);
     if (!payloadType) return null;
     return { name: left.name, type: payloadType, when };
   };
@@ -3191,6 +3603,7 @@ function typeCheckStatement(
           !expectedType &&
           (() => {
             const callee = stmt.value.callee.name;
+            if (!callee) return false;
             const sym = symbols.get(callee) ?? options?.externSymbols?.(callee);
             return !!(sym && sym.kind === 'function' && sym.pendingReturn);
           })()
@@ -4460,7 +4873,11 @@ function typeCheckExpr(
           return;
         case 'Call':
           if (!node.receiver && !node.enumName) {
-            used.add(node.callee.name);
+            if (node.callee.type === 'Identifier') {
+              used.add(node.callee.name);
+            } else {
+              visitExprNode(node.callee);
+            }
           }
           if (node.receiver) visitExprNode(node.receiver);
           for (const arg of node.args) visitExprNode(arg.value);
@@ -6610,13 +7027,14 @@ function typeCheckExpr(
         di
       );
       if (!callExpr.enumName) {
-        const calleeSym = symbols.get(callExpr.callee.name) ?? options?.externSymbols?.(callExpr.callee.name);
+        const calleeName = callExpr.callee.name;
+        const calleeSym = calleeName ? symbols.get(calleeName) ?? options?.externSymbols?.(calleeName) : undefined;
         if (calleeSym?.kind === 'function' && calleeSym.paramRefs?.[0]) {
           const isLValue = (value: LuminaExpr) => value.type === 'Identifier' || value.type === 'Member';
           if (!isLValue(expr.left)) {
             diagnostics.push(
               diagAt(
-                `'${callExpr.callee.name}' expects a reference for parameter 1`,
+                `'${calleeName ?? 'computed callee'}' expects a reference for parameter 1`,
                 expr.left.location ?? expr.location,
                 'error',
                 'REF_LVALUE_REQUIRED'
@@ -6811,19 +7229,6 @@ function typeCheckExpr(
       return narrowed ?? hmType ?? sym.type ?? null;
     }
     if (expr.type === 'IsExpr') {
-      if (options?.target === 'wasm') {
-        const checkedVariant = expr.enumName ? `${expr.enumName}.${expr.variant}` : expr.variant;
-        const valueName = expr.value.type === 'Identifier' ? expr.value.name : 'value';
-        diagnostics.push(
-          diagAt(
-            `'is' narrowing to '${checkedVariant}' is not supported in the WASM target. Rewrite as: match ${valueName} { ${checkedVariant}(_) => true, _ => false }.`,
-            expr.location,
-            'error',
-            'WASM-IS-001'
-          )
-        );
-        return 'bool';
-      }
       const valueType = typeCheckExpr(expr.value, symbols, diagnostics, scope, options, undefined, resolving, pendingDeps, currentFunction, di);
       if (!valueType) return 'bool';
       const parsed = parseTypeName(valueType);
@@ -6855,7 +7260,7 @@ function typeCheckExpr(
       return 'bool';
     }
     if (expr.type === 'Call') {
-      const callee = expr.callee.name;
+      const callee = getCallCalleeName(expr);
       const isLValue = (value: LuminaExpr) => value.type === 'Identifier' || value.type === 'Member';
       const rawArgs = expr.args ?? [];
       const argValues = rawArgs.map((arg) => arg.value);
@@ -6895,6 +7300,85 @@ function typeCheckExpr(
           allowPartialMoveBase,
           skipMoveChecks
         );
+      }
+
+      if (!expr.receiver && !expr.enumName && !callee) {
+        const calleeType = typeCheckExpr(
+          expr.callee,
+          symbols,
+          diagnostics,
+          scope,
+          options,
+          undefined,
+          resolving,
+          pendingDeps,
+          currentFunction,
+          di
+        );
+        const callableExprType = calleeType ? parseFunctionTypeName(calleeType) : null;
+        if (callableExprType) {
+          if (callableExprType.params.length !== argValues.length) {
+            diagnostics.push(diagAt(`Argument count mismatch for computed callee`, expr.location, 'error', 'LUM-002'));
+            return callableExprType.returnType;
+          }
+          for (let i = 0; i < argValues.length; i++) {
+            const argType = typeCheckExpr(
+              argValues[i],
+              symbols,
+              diagnostics,
+              scope,
+              options,
+              undefined,
+              resolving,
+              pendingDeps,
+              currentFunction,
+              di
+            );
+            const expected = callableExprType.params[i];
+            if (argType && !isTypeAssignable(argType, expected, symbols, options?.typeParams)) {
+              reportCallArgMismatch(
+                'computed callee',
+                i,
+                expected,
+                argType,
+                argLocations[i] ?? expr.location,
+                null
+              );
+            }
+          }
+          return callableExprType.returnType;
+        }
+        for (const arg of argValues) {
+          typeCheckExpr(
+            arg,
+            symbols,
+            diagnostics,
+            scope,
+            options,
+            undefined,
+            resolving,
+            pendingDeps,
+            currentFunction,
+            di
+          );
+        }
+        if (calleeType && normalizeTypeForComparison(calleeType) !== 'any') {
+          diagnostics.push(
+            diagAt(
+              `Expression of type '${formatTypeForDiagnostic(calleeType)}' is not callable`,
+              expr.location,
+              'error',
+              'NOT_CALLABLE'
+            )
+          );
+          return null;
+        }
+        return expectedType ?? 'any';
+      }
+
+      if (!callee) {
+        diagnostics.push(diagAt(`Computed callee member dispatch is not supported here`, expr.location, 'error', 'NOT_CALLABLE'));
+        return null;
       }
 
       if (expr.receiver) {
@@ -7298,7 +7782,27 @@ function typeCheckExpr(
         sym?.kind === 'variable'
           ? parseFunctionTypeName(sym.type ?? null)
           : null;
+      const deferredCallableValue =
+        sym?.kind === 'variable' &&
+        (!sym.type || normalizeTypeForComparison(sym.type) === 'any');
       if ((!sym || sym.kind !== 'function') && !callableValueType) {
+        if (deferredCallableValue) {
+          for (const arg of argValues) {
+            typeCheckExpr(
+              arg,
+              symbols,
+              diagnostics,
+              scope,
+              options,
+              undefined,
+              resolving,
+              pendingDeps,
+              currentFunction,
+              di
+            );
+          }
+          return expectedType ?? 'any';
+        }
         const enumVariant = findEnumVariant(symbols, callee, options);
         if (enumVariant) {
           const enumSym = symbols.get(enumVariant.enumName);

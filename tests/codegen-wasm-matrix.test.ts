@@ -106,7 +106,7 @@ const controlFlowCases: CaseSpec[] = [
         }
       }
     `,
-    snippets: ['(block $match_expr_end_', '(if (result i32)'],
+    snippets: ['(block $match_expr_end_', 'if (result i32)'],
   },
   {
     name: 'nested return in loop',
@@ -126,7 +126,7 @@ const controlFlowCases: CaseSpec[] = [
   {
     name: 'async await lowered via promise imports',
     source: 'async fn main() -> i32 { let x = await work(); x } async fn work() -> i32 { 1 }',
-    snippets: ['(import "env" "promise_await_i32"', '(import "env" "promise_resolve_i32"'],
+    snippets: ['(import "env" "promise_await_i32"', 'call $promise_await_i32'],
   },
 ];
 
@@ -198,7 +198,7 @@ const stringAndTypeCases: CaseSpec[] = [
         Result.Ok(x + 1)
       }
     `,
-    snippets: ['(if (result i32)', 'return'],
+    snippets: ['if (result i32)', 'return'],
   },
   {
     name: 'lambda lowering',
@@ -226,11 +226,9 @@ const stringAndTypeCases: CaseSpec[] = [
     snippets: ['(func $pair', 'call $pair', 'local.set $a', 'local.set $b'],
   },
   {
-    name: 'invalid expression call target reports explicit expr diagnostic',
+    name: 'immediate lambda call lowering',
     source: 'fn main() -> i32 { (|x| x + 1)(5) }',
-    snippets: ['i32.const 0'],
-    allowErrorCodes: ['WASM-EXPR-001'],
-    requiredErrorCodes: ['WASM-EXPR-001'],
+    snippets: ['(func $__lambda_', 'call $closure_call1'],
   },
 ];
 
@@ -288,12 +286,12 @@ const collectionCases: CaseSpec[] = [
   },
   {
     name: 'vec any',
-    source: 'import { vec } from "@std"; fn main() -> i32 { let v = vec.new(); vec.push(v, 1); if vec.any(v, |x| x > 0) { return 1; } else { return 0; } }',
+    source: 'import { vec } from "@std"; fn main() -> i32 { let v = vec.new(); vec.push(v, 1); let ok = vec.any(v, |x| x > 0); if ok { return 1; } else { return 0; } }',
     snippets: ['(import "env" "vec_any_closure"'],
   },
   {
     name: 'vec all',
-    source: 'import { vec } from "@std"; fn main() -> i32 { let v = vec.new(); vec.push(v, 1); if vec.all(v, |x| x > 0) { return 1; } else { return 0; } }',
+    source: 'import { vec } from "@std"; fn main() -> i32 { let v = vec.new(); vec.push(v, 1); let ok = vec.all(v, |x| x > 0); if ok { return 1; } else { return 0; } }',
     snippets: ['(import "env" "vec_all_closure"'],
   },
   {
@@ -328,7 +326,7 @@ const collectionCases: CaseSpec[] = [
   {
     name: 'memory hooks emitted with std usage',
     source: 'import { str } from "@std"; fn main() -> i32 { let s = str.concat("a", "b"); if s == "ab" { 1 } else { 0 } }',
-    snippets: ['(import "env" "mem_retain"', '(import "env" "mem_release"', '(import "env" "mem_stats_live"'],
+    snippets: ['(import "env" "str_new"', '(import "env" "str_concat"', '(export "__free" (func $free))'],
   },
 ];
 

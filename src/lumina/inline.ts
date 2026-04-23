@@ -111,8 +111,9 @@ const defaultOptions = (options: InlineOptions): ResolvedOptions => ({
 });
 
 const resolveCallName = (expr: LuminaCall): string => {
-  if (expr.enumName) return `${expr.enumName}.${expr.callee.name}`;
-  return expr.callee.name;
+  const calleeName = expr.callee.name ?? '<computed>';
+  if (expr.enumName) return `${expr.enumName}.${calleeName}`;
+  return calleeName;
 };
 
 const isHardThreadBoundary = (callee: string): boolean => callee === THREAD_SPAWN_HARD_BOUNDARY;

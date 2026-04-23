@@ -90,6 +90,12 @@ export interface LuminaNode {
   id?: number;
 }
 
+export interface LuminaAttribute {
+  name: string;
+  args?: string[];
+  location?: Location;
+}
+
 export interface LuminaProgram extends LuminaNode {
   type: 'Program';
   body: LuminaStatement[];
@@ -160,6 +166,7 @@ export interface LuminaImport {
   type: 'Import';
   spec: Array<string | LuminaImportSpec> | string | LuminaImportSpec;
   source: LuminaString;
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -179,6 +186,7 @@ export interface LuminaTypeDecl {
   typeParams?: LuminaTypeParam[];
   extern?: boolean;
   externModule?: string;
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -190,6 +198,7 @@ export interface LuminaTraitDecl {
   methods: LuminaTraitMethod[];
   associatedTypes?: LuminaTraitAssocType[];
   visibility?: 'public' | 'private';
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -224,6 +233,7 @@ export interface LuminaImplDecl {
   associatedTypes?: LuminaImplAssocType[];
   visibility?: 'public' | 'private';
   syntheticDerive?: string | null;
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -249,6 +259,7 @@ export interface LuminaStructDecl {
   derives?: string[];
   visibility?: 'public' | 'private';
   typeParams?: LuminaTypeParam[];
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -259,6 +270,7 @@ export interface LuminaEnumDecl {
   derives?: string[];
   visibility?: 'public' | 'private';
   typeParams?: LuminaTypeParam[];
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -297,6 +309,7 @@ export interface LuminaFnDecl {
   extern?: boolean;
   typeParams?: LuminaTypeParam[];
   externModule?: string;
+  attributes?: LuminaAttribute[];
   location?: Location;
 }
 
@@ -701,13 +714,18 @@ export interface LuminaCast {
 
 export interface LuminaCall {
   type: 'Call';
-  callee: LuminaIdentifier;
+  callee: LuminaExpr & { name?: string };
   args: LuminaArg[];
   typeArgs?: string[];
   enumName?: string | null;
   receiver?: LuminaExpr | null;
   location?: Location;
 }
+
+export const getCallCalleeIdentifier = (call: LuminaCall): LuminaIdentifier | null =>
+  call.callee.type === 'Identifier' ? call.callee : null;
+
+export const getCallCalleeName = (call: LuminaCall): string | null => getCallCalleeIdentifier(call)?.name ?? null;
 
 export interface LuminaIsExpr {
   type: 'IsExpr';

@@ -9,6 +9,8 @@ type CompilePayload = {
   sourcePath: string;
   outPath: string;
   target: 'cjs' | 'esm' | 'wasm';
+  emitWat?: boolean;
+  semanticTarget?: 'js' | 'wasm' | 'wasm-web' | 'wasm-standalone';
   grammarPath: string;
   useRecovery: boolean;
   diCfg?: boolean;
@@ -85,7 +87,7 @@ export async function runLuminaBundle(argv: string[], options: BundleOptions): P
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const stdout = options.stdout ?? console;
   if (argv.includes('--help') || argv.includes('-h')) {
-    stdout.log('Usage: lumina bundle <entry> --target <browser|wasm> [--out <path>] [--loader-out <path>] [--import-map <path>] [--minify]');
+    stdout.log('Usage: lumina bundle <entry> --target <browser|wasm> [--out <path>] [--loader-out <path>] [--import-map <path>] [--minify] [--emit-wat]');
     return;
   }
 
@@ -99,11 +101,12 @@ export async function runLuminaBundle(argv: string[], options: BundleOptions): P
   if (target === 'browser') {
     const outArg = parseFlagValue(argv, '--out');
     const outPath = path.resolve(cwd, outArg ?? 'dist/index.js');
-    const result = await options.deps.compileTask({
-      sourcePath,
-      outPath,
-      target: 'esm',
-      grammarPath: options.grammarPath,
+  const result = await options.deps.compileTask({
+    sourcePath,
+    outPath,
+    target: 'esm',
+    semanticTarget: 'js',
+    grammarPath: options.grammarPath,
       useRecovery: options.useRecovery,
       diCfg: options.diCfg,
       useAstJs: options.useAstJs,
@@ -131,14 +134,16 @@ export async function runLuminaBundle(argv: string[], options: BundleOptions): P
 
   const outArg = parseFlagValue(argv, '--out');
   const outPath = path.resolve(cwd, outArg ?? 'dist/index.wasm');
-  const watPath = outPath.endsWith('.wasm') ? outPath.replace(/\.wasm$/i, '.wat') : `${outPath}.wat`;
   const loaderOutArg = parseFlagValue(argv, '--loader-out');
   const loaderPath = path.resolve(cwd, loaderOutArg ?? 'dist/index.js');
+  const emitWat = hasFlag(argv, '--emit-wat');
 
   const result = await options.deps.compileTask({
     sourcePath,
-    outPath: watPath,
+    outPath,
     target: 'wasm',
+    emitWat,
+    semanticTarget: 'wasm-web',
     grammarPath: options.grammarPath,
     useRecovery: options.useRecovery,
     diCfg: options.diCfg,
@@ -152,14 +157,8 @@ export async function runLuminaBundle(argv: string[], options: BundleOptions): P
   });
   if (!result.ok) throw new Error('Bundle failed: wasm target compilation failed');
 
-  const producedWasm = watPath.replace(/\.wat$/i, '.wasm');
-  if (!existsSync(producedWasm)) {
-    throw new Error(`Expected wasm output missing: ${producedWasm}`);
-  }
-
-  if (producedWasm !== outPath) {
-    await fs.mkdir(path.dirname(outPath), { recursive: true });
-    await fs.copyFile(producedWasm, outPath);
+  if (!existsSync(outPath)) {
+    throw new Error(`Expected wasm output missing: ${outPath}`);
   }
 
   await writeLoaderShim(loaderPath, outPath);

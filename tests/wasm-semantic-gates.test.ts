@@ -11,7 +11,7 @@ const parser = compileGrammar(luminaGrammar);
 const parseProgram = (source: string): LuminaProgram => parser.parse(source) as LuminaProgram;
 
 describe('WASM semantic gates', () => {
-  it('rejects is narrowing when semantic target is wasm', () => {
+  it('accepts is narrowing when semantic target is wasm', () => {
     const source = `
       enum Option<T> {
         Some(T),
@@ -29,7 +29,7 @@ describe('WASM semantic gates', () => {
     const ast = parseProgram(source);
     const wasmAnalysis = analyzeLumina(ast, { target: 'wasm' });
     const jsAnalysis = analyzeLumina(ast, { target: 'esm' });
-    expect(wasmAnalysis.diagnostics.some((d) => d.code === 'WASM-IS-001' && d.severity === 'error')).toBe(true);
-    expect(jsAnalysis.diagnostics.some((d) => d.code === 'WASM-IS-001')).toBe(false);
+    expect(wasmAnalysis.diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0);
+    expect(jsAnalysis.diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0);
   });
 });

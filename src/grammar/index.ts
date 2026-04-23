@@ -56,6 +56,61 @@ export interface CompileOptions {
   trace?: boolean;
 }
 
+type CacheableCompileOptions = Omit<CompileOptions, 'dependencies' | 'plugins'> & {
+  dependencies?: undefined;
+  plugins?: undefined;
+};
+
+type CompiledParserCacheEntry = {
+  parse: CompiledGrammar['parse'];
+};
+
+const compiledParserCache = new Map<string, CompiledParserCacheEntry>();
+
+function isLocationRange(value: unknown): value is LocationRange {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'start' in value &&
+    'end' in value
+  );
+}
+
+function toCacheableGrammarSource(
+  grammarSource: CompileOptions['grammarSource']
+): string | LocationRange | undefined | null {
+  if (grammarSource === undefined) return undefined;
+  if (typeof grammarSource === 'string') return grammarSource;
+  if (isLocationRange(grammarSource)) return grammarSource;
+  return null;
+}
+
+function getCompileCacheKey(grammar: string, options: CompileOptions): string | null {
+  if (options.plugins && options.plugins.length > 0) return null;
+  if (options.dependencies && Object.keys(options.dependencies).length > 0) return null;
+
+  const grammarSource = toCacheableGrammarSource(options.grammarSource);
+  if (grammarSource === null) return null;
+
+  const cacheableOptions: CacheableCompileOptions = {
+    allowedStartRules: options.allowedStartRules,
+    cache: options.cache,
+    exportVar: options.exportVar,
+    format: options.format,
+    grammarSource,
+    header: options.header,
+    optimize: options.optimize,
+    output: options.output,
+    trace: options.trace,
+  };
+
+  return JSON.stringify([grammar, cacheableOptions]);
+}
+
+export function clearCompiledGrammarCache(): void {
+  compiledParserCache.clear();
+}
+
 // --- Symbol Table for Scope Management ---
 
 /**
@@ -163,9 +218,24 @@ export function compileGrammar<ASTNode = unknown>(
       ...options,
     };
 
+    const cacheKey = analyzer ? null : getCompileCacheKey(grammar, defaultOptions);
+    const cached = cacheKey ? compiledParserCache.get(cacheKey) : undefined;
+    if (cached) {
+      return {
+        parse: cached.parse as CompiledGrammar<ASTNode>['parse'],
+        source: grammar,
+        options: defaultOptions,
+        analyze: analyzer,
+      };
+    }
+
     const parser = generate(grammar, defaultOptions as ParserBuildOptions);
+    const parse = parser.parse.bind(parser) as CompiledGrammar<ASTNode>['parse'];
+    if (cacheKey) {
+      compiledParserCache.set(cacheKey, { parse });
+    }
     return {
-      parse: parser.parse.bind(parser),
+      parse,
       source: grammar,
       options: defaultOptions,
       analyze: analyzer,

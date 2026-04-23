@@ -1,5 +1,6 @@
 import { parentPort } from 'node:worker_threads';
 import { compileLuminaTask, checkLuminaTask, setBuildConfig } from './lumina-core.js';
+import type { AnalyzeTarget } from '../lumina/target-profiles.js';
 
 type InitMessage = {
   type: 'init';
@@ -17,6 +18,8 @@ type CompileMessage = {
     sourcePath: string;
     outPath: string;
     target: 'cjs' | 'esm' | 'wasm' | 'dual';
+    emitWat?: boolean;
+    semanticTarget?: AnalyzeTarget;
     grammarPath: string;
     useRecovery: boolean;
     diCfg?: boolean;
@@ -37,6 +40,7 @@ type CheckMessage = {
     sourcePath: string;
     grammarPath: string;
     useRecovery: boolean;
+    semanticTarget?: AnalyzeTarget;
   };
 };
 

@@ -34,6 +34,7 @@ describe('lumina bundle --target browser', () => {
       deps: {
         compileTask: async (payload) => {
           calls.push({ target: payload.target, outPath: payload.outPath });
+          expect(payload.semanticTarget).toBe('js');
           fs.mkdirSync(path.dirname(payload.outPath), { recursive: true });
           fs.writeFileSync(payload.outPath, 'export const value = 1;\n', 'utf-8');
           return { ok: true };
@@ -62,6 +63,7 @@ describe('lumina bundle --target browser', () => {
       useRecovery: false,
       deps: {
         compileTask: async (payload) => {
+          expect(payload.semanticTarget).toBe('js');
           fs.mkdirSync(path.dirname(payload.outPath), { recursive: true });
           fs.writeFileSync(
             payload.outPath,
@@ -120,6 +122,7 @@ function helper() {
       useRecovery: false,
       deps: {
         compileTask: async (payload) => {
+          expect(payload.semanticTarget).toBe('js');
           fs.mkdirSync(path.dirname(payload.outPath), { recursive: true });
           fs.writeFileSync(payload.outPath, 'export const value = 1;\n', 'utf-8');
           fs.writeFileSync(`${payload.outPath}.map`, '{"version":3,"sources":["src/main.lm"]}', 'utf-8');

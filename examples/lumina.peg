@@ -36,6 +36,24 @@
       "{", "}"
     ];
   }
+
+  function normalizeAttributes(attrs) {
+    return Array.isArray(attrs) ? attrs : [];
+  }
+
+  function collectAttributeArgs(attrs, name) {
+    const values = [];
+    for (const attr of normalizeAttributes(attrs)) {
+      if (attr && attr.name === name && Array.isArray(attr.args)) {
+        values.push(...attr.args);
+      }
+    }
+    return values;
+  }
+
+  function stripAttributes(attrs, name) {
+    return normalizeAttributes(attrs).filter(attr => attr && attr.name !== name);
+  }
 }
 Start
   = _ statements:TopStatementList _ { return createNode("Program", { body: statements }, location); }
@@ -102,9 +120,22 @@ Statement
   / ExprStmt
   / Block
 
+OuterAttr
+  = "#[" _ node:IdName _ args:AttributeArgs? _ "]" _ {
+      return { name: node.name, args: args || [], location: node.location };
+    }
+
+AttributeArgs
+  = "(" _ head:AttributeArg tail:(_ "," _ AttributeArg)* _ ","? ")" {
+      return [head].concat(tail.map(t => t[3]));
+    }
+
+AttributeArg
+  = value:$((!("," / ")") .)+) { return value.trim(); }
+
 Import
-  = "import" _ spec:ImportSpec _ "from" _ source:String _ ";"? {
-      return createNode("Import", { spec, source }, location);
+  = attrs:OuterAttr* "import" _ spec:ImportSpec _ "from" _ source:String _ ";"? {
+      return createNode("Import", { spec, source, attributes: normalizeAttributes(attrs) }, location);
     }
 
 MacroRulesDecl
@@ -208,22 +239,22 @@ NamespaceImport
   = "*" _ "as" _ alias:IdName { return { name: alias.name, namespace: true, location: alias.location }; }
 
 TypeDecl
-  = visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ aliasType:TypeName !(_ ("|" / "(")) _ ";"? {
-      return createNode("TypeDecl", { name: node.name, body: [], aliasType, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ aliasType:TypeName !(_ ("|" / "(")) _ ";"? {
+      return createNode("TypeDecl", { name: node.name, body: [], aliasType, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, attributes: normalizeAttributes(attrs), location: node.location }, location);
     }
-  / visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ body:TypeBody _ ";"? {
-      return createNode("TypeDecl", { name: node.name, body, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, location: node.location }, location);
+  / attrs:OuterAttr* visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ body:TypeBody _ ";"? {
+      return createNode("TypeDecl", { name: node.name, body, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, attributes: normalizeAttributes(attrs), location: node.location }, location);
     }
 
 TraitDecl
-  = visibility:Visibility? _ "trait" _ node:IdName _ tparams:TypeParams? _ supers:(_ ":" _ TypeBounds)? _ "{" _ items:TraitItemList? _ "}" _ ";"? {
+  = attrs:OuterAttr* visibility:Visibility? _ "trait" _ node:IdName _ tparams:TypeParams? _ supers:(_ ":" _ TypeBounds)? _ "{" _ items:TraitItemList? _ "}" _ ";"? {
       const methods = [];
       const associatedTypes = [];
       for (const item of items || []) {
         if (item && item.type === "TraitMethod") methods.push(item);
         if (item && item.type === "TraitAssocType") associatedTypes.push(item);
       }
-      return createNode("TraitDecl", { name: node.name, typeParams: tparams || [], superTraits: supers ? supers[3] : [], methods, associatedTypes, visibility: visibility ?? "private", location: node.location }, location);
+      return createNode("TraitDecl", { name: node.name, typeParams: tparams || [], superTraits: supers ? supers[3] : [], methods, associatedTypes, visibility: visibility ?? "private", attributes: normalizeAttributes(attrs), location: node.location }, location);
     }
 
 TraitItemList
@@ -251,14 +282,14 @@ TraitMethodBody
   / _ ";"? { return null; }
 
 ImplDecl
-  = visibility:Visibility? _ "impl" _ tparams:TypeParams? _ traitType:TypeName _ _ "for" _ forType:TypeName _ whereInfo:WhereClause? _ "{" _ items:ImplItemList? _ "}" _ ";"? {
+  = attrs:OuterAttr* visibility:Visibility? _ "impl" _ tparams:TypeParams? _ traitType:TypeName _ _ "for" _ forType:TypeName _ whereInfo:WhereClause? _ "{" _ items:ImplItemList? _ "}" _ ";"? {
       const methods = [];
       const associatedTypes = [];
       for (const item of items || []) {
         if (item && item.type === "FnDecl") methods.push(item);
         if (item && item.type === "ImplAssocType") associatedTypes.push(item);
       }
-      return createNode("ImplDecl", { traitType, forType, typeParams: tparams || [], whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], methods, associatedTypes, visibility: visibility ?? "private", location: location() }, location);
+      return createNode("ImplDecl", { traitType, forType, typeParams: tparams || [], whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], methods, associatedTypes, visibility: visibility ?? "private", attributes: normalizeAttributes(attrs), location: location() }, location);
     }
 
 ImplItemList
@@ -281,17 +312,15 @@ ImplMethod
     }
 
 AdtTypeDecl
-  = visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ variants:AdtVariantList _ ";"? {
-      return createNode("EnumDecl", { name: node.name, variants: variants || [], typeParams: tparams || [], visibility: visibility ?? "private", location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "type" _ node:IdName _ tparams:TypeParams? _ "=" _ variants:AdtVariantList _ ";"? {
+      const deriveList = collectAttributeArgs(attrs, "derive");
+      return createNode("EnumDecl", { name: node.name, variants: variants || [], derives: deriveList, typeParams: tparams || [], visibility: visibility ?? "private", attributes: stripAttributes(attrs, "derive"), location: node.location }, location);
     }
 
 StructDecl
-  = derives:DeriveAttr* visibility:Visibility? _ "struct" _ node:IdName _ tparams:TypeParams? _ body:StructBody {
-      const deriveList = [];
-      for (const item of derives || []) {
-        if (Array.isArray(item)) deriveList.push(...item);
-      }
-      return createNode("StructDecl", { name: node.name, body: body.fields || [], derives: deriveList, typeParams: tparams || [], visibility: visibility ?? "private", location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "struct" _ node:IdName _ tparams:TypeParams? _ body:StructBody {
+      const deriveList = collectAttributeArgs(attrs, "derive");
+      return createNode("StructDecl", { name: node.name, body: body.fields || [], derives: deriveList, typeParams: tparams || [], visibility: visibility ?? "private", attributes: stripAttributes(attrs, "derive"), location: node.location }, location);
     }
 
 StructBody
@@ -321,17 +350,14 @@ DeriveList
   = head:IdName tail:(_ "," _ IdName)* _ ","? { return [head.name].concat(tail.map(t => t[3].name)); }
 
 EnumDecl
-  = derives:DeriveAttr* visibility:Visibility? _ "enum" _ node:IdName _ tparams:TypeParams? _ "{" _ variants:EnumVariantList? _ "}" _ ";"? {
-      const deriveList = [];
-      for (const item of derives || []) {
-        if (Array.isArray(item)) deriveList.push(...item);
-      }
-      return createNode("EnumDecl", { name: node.name, variants: variants || [], derives: deriveList, typeParams: tparams || [], visibility: visibility ?? "private", location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "enum" _ node:IdName _ tparams:TypeParams? _ "{" _ variants:EnumVariantList? _ "}" _ ";"? {
+      const deriveList = collectAttributeArgs(attrs, "derive");
+      return createNode("EnumDecl", { name: node.name, variants: variants || [], derives: deriveList, typeParams: tparams || [], visibility: visibility ?? "private", attributes: stripAttributes(attrs, "derive"), location: node.location }, location);
     }
 
 ExternTypeDecl
-  = visibility:Visibility? _ "extern" _ "type" _ node:IdName _ tparams:TypeParams? _ source:FromClause? _ ";"? {
-      return createNode("TypeDecl", { name: node.name, body: [], typeParams: tparams || [], visibility: visibility ?? "public", extern: true, externModule: source ?? null, location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "extern" _ "type" _ node:IdName _ tparams:TypeParams? _ source:FromClause? _ ";"? {
+      return createNode("TypeDecl", { name: node.name, body: [], typeParams: tparams || [], visibility: visibility ?? "public", extern: true, externModule: source ?? null, attributes: normalizeAttributes(attrs), location: node.location }, location);
     }
 
 TypeBody
@@ -386,15 +412,15 @@ TypePath
   = head:IdName tail:(_ "::" _ IdName)* { return [head.name].concat(tail.map(t => t[3].name)); }
 
 FnDecl
-  = visibility:Visibility? _ mods:FnModifiers? "fn" _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ body:Block {
-      const fnDecl = { name: node.name, async: !!mods?.async, params: params || [], returnType: ret || null, whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], body, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, location: node.location };
+  = attrs:OuterAttr* visibility:Visibility? _ mods:FnModifiers? "fn" _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ body:Block {
+      const fnDecl = { name: node.name, async: !!mods?.async, params: params || [], returnType: ret || null, whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], body, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, attributes: normalizeAttributes(attrs), location: node.location };
       if (mods?.comptime) fnDecl.comptime = true;
       return createNode("FnDecl", fnDecl, location);
     }
 
 ExternFnDecl
-  = visibility:Visibility? _ "extern" _ "fn" _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ source:FromClause? _ ";"? {
-      return createNode("FnDecl", { name: node.name, params: params || [], returnType: ret || "any", whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], body: createNode("Block", { body: [] }, location), typeParams: tparams || [], visibility: visibility ?? "public", extern: true, externModule: source ?? null, location: node.location }, location);
+  = attrs:OuterAttr* visibility:Visibility? _ "extern" _ "fn" _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ source:FromClause? _ ";"? {
+      return createNode("FnDecl", { name: node.name, params: params || [], returnType: ret || "any", whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], body: createNode("Block", { body: [] }, location), typeParams: tparams || [], visibility: visibility ?? "public", extern: true, externModule: source ?? null, attributes: normalizeAttributes(attrs), location: node.location }, location);
     }
 
 FnModifiers
@@ -776,7 +802,7 @@ Postfix
             const callee = createNode("Identifier", { name: acc.property, location: acc.location }, location);
             return createNode("Call", { callee, args: part.args, typeArgs: part.typeArgs, receiver: acc.object }, location);
           }
-          return createNode("Call", { callee: createNode("Identifier", { name: "__invalid__", location: location() }, location), args: part.args, typeArgs: part.typeArgs }, location);
+          return createNode("Call", { callee: acc, args: part.args, typeArgs: part.typeArgs }, location);
         }
         return acc;
       }, head);

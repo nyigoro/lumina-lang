@@ -585,7 +585,8 @@ const visitExpr = (
 ) => {
   switch (expr.type) {
     case 'Call': {
-      const calleeName = expr.enumName ? `${expr.enumName}.${expr.callee.name}` : expr.callee.name;
+      const calleeNameBase = expr.callee.name ?? '<computed>';
+      const calleeName = expr.enumName ? `${expr.enumName}.${calleeNameBase}` : calleeNameBase;
       if (expr.id != null && genericFns.has(calleeName)) {
         const signature = hm.inferredCalls.get(expr.id);
         if (signature) recordInstantiation(ctx, calleeName, signature);
@@ -1176,7 +1177,7 @@ const collectConstStructTypeRefs = (
   const visitExpr = (expr: LuminaExpr) => {
     switch (expr.type) {
       case 'Call':
-        if (expr.typeArgs && expr.typeArgs.length > 0 && structDecls.has(expr.callee.name)) {
+        if (expr.callee.name && expr.typeArgs && expr.typeArgs.length > 0 && structDecls.has(expr.callee.name)) {
           addRef(expr.callee.name, expr.typeArgs.map((arg) => typeArgToText(arg as unknown as string | LuminaConstExpr)).join('|'));
         }
       if (expr.receiver) visitExpr(expr.receiver);
@@ -1441,7 +1442,7 @@ const collectConstGenericFnTypeArgs = (
   const visitExpr = (expr: LuminaExpr) => {
     switch (expr.type) {
       case 'Call':
-        if (!expr.enumName && constFnDecls.has(expr.callee.name) && expr.typeArgs && expr.typeArgs.length > 0) {
+        if (!expr.enumName && expr.callee.name && constFnDecls.has(expr.callee.name) && expr.typeArgs && expr.typeArgs.length > 0) {
           addRef(
             expr.callee.name,
             expr.typeArgs.map((arg) => typeArgToText(arg as unknown as string | LuminaConstExpr))
@@ -1679,15 +1680,17 @@ export function rewriteCallSites(
   const visitExprForRewrite = (expr: LuminaExpr) => {
     switch (expr.type) {
       case 'Call': {
-        const calleeName = expr.enumName ? `${expr.enumName}.${expr.callee.name}` : expr.callee.name;
+        const calleeNameBase = expr.callee.name ?? '<computed>';
+        const calleeIdent = expr.callee.type === 'Identifier' ? expr.callee : null;
+        const calleeName = expr.enumName ? `${expr.enumName}.${calleeNameBase}` : calleeNameBase;
         let rewrittenByExplicit = false;
-        if (!expr.enumName && expr.typeArgs && expr.typeArgs.length > 0) {
+        if (!expr.enumName && calleeIdent && expr.typeArgs && expr.typeArgs.length > 0) {
           const typeArgKey = expr.typeArgs
             .map((arg) => typeArgToText(arg as unknown as string | LuminaConstExpr))
             .join('|');
           const explicit = ctx.explicitConstFnMangledNames?.get(calleeName)?.get(typeArgKey);
           if (explicit) {
-            expr.callee.name = explicit;
+            calleeIdent.name = explicit;
             expr.typeArgs = [];
             rewrittenByExplicit = true;
           }
@@ -1698,8 +1701,8 @@ export function rewriteCallSites(
             const key = signatureKey(signature);
             const perFn = mangledNames.get(calleeName);
             const target = perFn?.get(key);
-            if (target && !expr.enumName) {
-              expr.callee.name = target;
+            if (target && !expr.enumName && calleeIdent) {
+              calleeIdent.name = target;
             }
           }
         }

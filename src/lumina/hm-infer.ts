@@ -420,7 +420,8 @@ function validateConstFnWhereClausesAtCall(
   diagnostics: Diagnostic[]
 ): void {
   if (!activeConstFnConstraints) return;
-  const meta = activeConstFnConstraints.get(expr.callee.name);
+  const callName = expr.callee.name ?? 'computed callee';
+  const meta = activeConstFnConstraints.get(callName);
   if (!meta) return;
   const constParams = meta.typeParams.filter((param) => !!param.isConst);
   if (constParams.length === 0) return;
@@ -2236,6 +2237,8 @@ function inferExpr(
 
       const rawArgs = expr.args ?? [];
       const rawArgValues = rawArgs.map((arg) => arg.value);
+      const directCalleeName = expr.callee.type === 'Identifier' ? expr.callee.name : null;
+      const calleeLabel = directCalleeName ?? expr.callee.name ?? 'computed callee';
 
       const resolveArgsForHm = (
         paramNames: string[] | undefined,
@@ -2326,7 +2329,7 @@ function inferExpr(
                 diagnostics.push({
                   severity: 'error',
                   code: 'LUM-002',
-                  message: `Argument count mismatch for '${expr.callee.name}'`,
+                  message: `Argument count mismatch for '${calleeLabel}'`,
                   source: 'lumina',
                   location: diagLocation(expr.location),
                 });
@@ -2346,7 +2349,27 @@ function inferExpr(
         return { args: resolved, missingRequired, tooMany };
       };
 
-      if (!expr.receiver && !expr.enumName && expr.callee.name === 'cast') {
+      if (!expr.receiver && !expr.enumName && !directCalleeName) {
+        const selectionArgTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
+        const resultType = freshTypeVar();
+        const fnType: Type = { kind: 'function', args: selectionArgTypes, returnType: resultType };
+        const calleeType = inferChild(expr.callee, fnType);
+        if (!calleeType) return null;
+        tryUnify(calleeType, fnType, subst, diagnostics, {
+          location: expr.location,
+          note: 'Computed callee must be callable',
+        });
+        if (expectedType) {
+          tryUnify(resultType, expectedType, subst, diagnostics, {
+            location: expr.location,
+            note: 'Computed call result must match expected type',
+          });
+        }
+        recordCallSignature(expr, selectionArgTypes, resultType, subst, inferredCalls);
+        return recordExprType(expr, resultType, subst);
+      }
+
+      if (!expr.receiver && !expr.enumName && directCalleeName === 'cast') {
         if ((expr.typeArgs?.length ?? 0) !== 1 || rawArgValues.length !== 1) {
           diagnostics.push({
             severity: 'error',
@@ -3312,13 +3335,13 @@ function inferExpr(
       }
 
       if (moduleBindings) {
-        const directBinding = moduleBindings.get(expr.callee.name);
+        const directBinding = moduleBindings.get(calleeLabel);
         const directCandidates =
           directBinding ? resolveModuleFunctionCandidates(directBinding, undefined) : [];
         if (directCandidates.length > 0) {
           const selectionArgTypes = rawArgValues.map((arg) => inferChild(arg) ?? freshTypeVar());
           const selected = selectModuleOverloadCandidate(
-            expr.callee.name,
+            calleeLabel,
             directCandidates,
             selectionArgTypes,
             expr.location
@@ -3355,10 +3378,10 @@ function inferExpr(
         }
       }
 
-      const calleeScheme = env.lookup(expr.callee.name);
+      const calleeScheme = env.lookup(calleeLabel);
       if (!calleeScheme) return null;
       const calleeType = instantiate(calleeScheme);
-      const paramInfo = activeFnParamInfo?.get(expr.callee.name);
+      const paramInfo = activeFnParamInfo?.get(calleeLabel);
       const resolved = paramInfo ? resolveArgsForHm(paramInfo.names, paramInfo.defaults) : null;
       if (resolved?.tooMany) {
         diagnostics.push({
@@ -4345,7 +4368,7 @@ function inferEnumConstructor(
     });
     return null;
   }
-  const variantInfo = info.variants.get(expr.callee.name);
+      const variantInfo = info.variants.get(expr.callee.name ?? '<computed>');
   if (!variantInfo) {
     diagnostics.push({
       severity: 'error',

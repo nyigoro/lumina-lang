@@ -4,7 +4,6 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import fg from 'fast-glob';
 import { Worker } from 'node:worker_threads';
-import { execSync } from 'node:child_process';
 
 import { compileGrammar } from '../grammar/index.js';
 import { parseInput, ParserUtils, type Diagnostic } from '../parser/index.js';
@@ -15,13 +14,15 @@ import {
   optimizeIR,
   generateJS,
   generateJSFromAst,
-  generateWATFromAst,
+  generateWasmTextModuleFromAst,
+  emitWasmBinary,
   irToDot,
   inferProgram,
   monomorphize,
   formatDiagnosticExplanation,
   getDiagnosticExplanation,
 } from '../index.js';
+import { emitWAT } from '../lumina/wasm-emit-wat.js';
 import { inlinePass } from '../lumina/inline.js';
 import { comptimePass } from '../lumina/comptime.js';
 import { fuseVecPipelines } from '../lumina/stream-fusion.js';
@@ -58,8 +59,13 @@ import { resolveRegistryConfig, search as searchRegistry } from '../lumina/regis
 import { readLockfileSync } from '../lumina/lockfile.js';
 import { scanDirectory } from '../lumina/secret-scan.js';
 import { generateExportsMap } from '../lumina/dual-output.js';
+import {
+  type AnalyzeTarget,
+} from '../lumina/target-profiles.js';
 
 type Target = 'cjs' | 'esm' | 'wasm' | 'dual';
+type CliTarget = Target | 'js' | 'wasm-web' | 'wasm-standalone';
+type ModuleFormat = 'esm' | 'cjs';
 
 const DEFAULT_GRAMMAR_PATHS = [
   path.resolve('src/grammar/lumina.peg'),
@@ -69,7 +75,8 @@ const DEFAULT_GRAMMAR_PATHS = [
 type LuminaConfig = {
   grammarPath?: string;
   outDir?: string;
-  target?: Target;
+  target?: CliTarget;
+  module?: ModuleFormat;
   entries?: string[];
   watch?: string[];
   stdPath?: string;
@@ -98,8 +105,21 @@ function validateConfig(raw: LuminaConfig): LuminaConfig {
     else errors.push('outDir must be a string');
   }
   if (raw.target !== undefined) {
-    if (raw.target === 'cjs' || raw.target === 'esm' || raw.target === 'wasm' || raw.target === 'dual') normalized.target = raw.target;
-    else errors.push('target must be "cjs", "esm", "wasm", or "dual"');
+    if (
+      raw.target === 'cjs' ||
+      raw.target === 'esm' ||
+      raw.target === 'wasm' ||
+      raw.target === 'dual' ||
+      raw.target === 'js' ||
+      raw.target === 'wasm-web' ||
+      raw.target === 'wasm-standalone'
+    ) normalized.target = raw.target;
+    else errors.push('target must be "cjs", "esm", "wasm", "dual", "js", "wasm-web", or "wasm-standalone"');
+  }
+  if ((raw as LuminaConfig & { module?: unknown }).module !== undefined) {
+    const moduleValue = (raw as LuminaConfig & { module?: unknown }).module;
+    if (moduleValue === 'esm' || moduleValue === 'cjs') normalized.module = moduleValue;
+    else errors.push('module must be "esm" or "cjs"');
   }
 
   const normalizeList = (value: unknown, key: string): string[] | undefined => {
@@ -201,9 +221,47 @@ function buildNextPageCmd(
   return parts.join(' ');
 }
 
-function resolveTarget(value: string | undefined): Target | null {
+function resolveTarget(value: string | undefined): CliTarget | null {
   if (!value) return null;
-  return value === 'cjs' || value === 'esm' || value === 'wasm' || value === 'dual' ? value : null;
+  return value === 'cjs' ||
+    value === 'esm' ||
+    value === 'wasm' ||
+    value === 'dual' ||
+    value === 'js' ||
+    value === 'wasm-web' ||
+    value === 'wasm-standalone'
+    ? value
+    : null;
+}
+
+function resolveModuleFormat(value: string | undefined): ModuleFormat | null {
+  if (!value) return null;
+  return value === 'esm' || value === 'cjs' ? value : null;
+}
+
+function resolveCompilePlan(target: CliTarget, moduleFormat?: ModuleFormat): {
+  compileTarget: Target;
+  semanticTarget: AnalyzeTarget;
+} {
+  if (target === 'dual') {
+    return { compileTarget: 'dual', semanticTarget: 'js' };
+  }
+  if (target === 'cjs') {
+    return { compileTarget: 'cjs', semanticTarget: 'js' };
+  }
+  if (target === 'esm') {
+    return { compileTarget: 'esm', semanticTarget: 'js' };
+  }
+  if (target === 'js') {
+    return { compileTarget: moduleFormat ?? 'esm', semanticTarget: 'js' };
+  }
+  if (target === 'wasm-standalone') {
+    return { compileTarget: 'wasm', semanticTarget: 'wasm-standalone' };
+  }
+  if (target === 'wasm-web') {
+    return { compileTarget: 'wasm', semanticTarget: 'wasm-web' };
+  }
+  return { compileTarget: 'wasm', semanticTarget: 'wasm' };
 }
 
 const blockedOutputRoots = [
@@ -288,10 +346,10 @@ function resolveOutPath(
     return validateOutputPath(path.resolve('dist'));
   }
   if (outPathArg) return validateOutputPath(outPathArg);
-  const ext = target === 'wasm' ? '.wat' : '.js';
+  const ext = target === 'wasm' ? '.wasm' : '.js';
   const base = path.basename(sourcePath, path.extname(sourcePath)) + ext;
   if (outDir) return validateOutputPath(path.resolve(outDir, base));
-  return validateOutputPath(target === 'wasm' ? 'lumina.out.wat' : 'lumina.out.js');
+  return validateOutputPath(target === 'wasm' ? 'lumina.out.wasm' : 'lumina.out.js');
 }
 
 type BuildConfig = {
@@ -319,6 +377,7 @@ type FileCacheEntry = {
   diagnostics: ReturnType<typeof analyzeLumina>['diagnostics'];
   ir: ReturnType<typeof optimizeIR>;
   grammarHash: string;
+  semanticTarget?: AnalyzeTarget;
 };
 
 type DiagnosticLocationLike = Parameters<typeof highlightSnippet>[1];
@@ -341,6 +400,58 @@ type CompileLuminaResult =
       map?: RawSourceMap;
       ir?: Parameters<typeof irToDot>[0];
     };
+
+type WasmArtifactPaths = {
+  wasmPath: string;
+  watPath?: string;
+};
+
+function resolveWasmArtifactPaths(outPath: string, emitWat: boolean): WasmArtifactPaths {
+  if (/\.wat$/i.test(outPath)) {
+    return {
+      wasmPath: outPath.replace(/\.wat$/i, '.wasm'),
+      watPath: outPath,
+    };
+  }
+  if (/\.wasm$/i.test(outPath)) {
+    return {
+      wasmPath: outPath,
+      watPath: emitWat ? outPath.replace(/\.wasm$/i, '.wat') : undefined,
+    };
+  }
+  return {
+    wasmPath: outPath,
+    watPath: emitWat ? `${outPath}.wat` : undefined,
+  };
+}
+
+async function emitWasmArtifacts(
+  outPath: string,
+  module: Parameters<typeof emitWasmBinary>[0],
+  emitWat: boolean,
+  options: { sourceMap?: boolean; inlineSourceMap?: boolean } = {}
+): Promise<CompileLuminaResult> {
+  const { wasmPath, watPath } = resolveWasmArtifactPaths(outPath, emitWat);
+  try {
+    const binary = emitWasmBinary(module);
+    await fs.mkdir(path.dirname(wasmPath), { recursive: true });
+    await fs.writeFile(wasmPath, binary);
+    if (options.sourceMap && !options.inlineSourceMap && module.debugMetadata) {
+      await fs.writeFile(`${wasmPath}.map`, `${JSON.stringify(module.debugMetadata, null, 2)}\n`, 'utf-8');
+    }
+    if (watPath) {
+      await fs.mkdir(path.dirname(watPath), { recursive: true });
+      await fs.writeFile(watPath, emitWAT(module), 'utf-8');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`WASM binary emission failed: ${message}`);
+    return { ok: false };
+  }
+  console.log(`Compiled WASM: ${wasmPath}`);
+  if (watPath) console.log(`WAT debug output: ${watPath}`);
+  return { ok: true, map: undefined, ir: undefined };
+}
 
 type BuildCache = {
   grammarHash: string | null;
@@ -1708,6 +1819,8 @@ async function compileLuminaTopologically(
   sourcePath: string,
   outPath: string,
   target: Target,
+  emitWat: boolean,
+  semanticTarget: AnalyzeTarget,
   grammarPath: string,
   useRecovery: boolean,
   diCfg: boolean,
@@ -1750,6 +1863,8 @@ async function compileLuminaTopologically(
     sourcePath,
     outPath,
     target,
+    emitWat,
+    semanticTarget,
     grammarPath,
     useRecovery,
     diCfg,
@@ -1767,6 +1882,8 @@ async function compileLumina(
   sourcePath: string,
   outPath: string,
   target: Target,
+  emitWat: boolean,
+  semanticTarget: AnalyzeTarget,
   grammarPath: string,
   useRecovery: boolean,
   diCfg: boolean,
@@ -1788,6 +1905,8 @@ async function compileLumina(
       sourcePath,
       esmOut,
       'esm',
+      emitWat,
+      semanticTarget,
       grammarPath,
       useRecovery,
       diCfg,
@@ -1804,6 +1923,8 @@ async function compileLumina(
       sourcePath,
       cjsOut,
       'cjs',
+      emitWat,
+      semanticTarget,
       grammarPath,
       useRecovery,
       diCfg,
@@ -1833,7 +1954,7 @@ async function compileLumina(
     }
     return true;
   };
-  const analysisOptions = { diDebug: diCfg, stopOnUnresolvedMemberError, target };
+  const analysisOptions = { diDebug: diCfg, stopOnUnresolvedMemberError, target: semanticTarget };
   const lockfileRoot = findLockfileRoot(sourcePath);
   const applyMonomorphize = (program: unknown): unknown | null => {
     const mono = monomorphizeAst(program, { noInline, noComptime });
@@ -1862,24 +1983,20 @@ async function compileLumina(
         formatDiagnosticsWithSnippet(source, analysis.diagnostics);
         return { ok: false };
       }
-    const monoAst = applyMonomorphize(bundle.program as never);
-    if (!monoAst) return { ok: false };
-    const wasm = generateWATFromAst(monoAst as never, { exportMain: true });
-    if (wasm.diagnostics.length > 0) {
-      formatDiagnosticsWithSnippet(source, wasm.diagnostics);
-      return { ok: false };
+      const monoAst = applyMonomorphize(bundle.program as never);
+      if (!monoAst) return { ok: false };
+      const wasm = generateWasmTextModuleFromAst(monoAst as never, {
+        exportMain: true,
+        targetProfile: semanticTarget === 'wasm-standalone' ? 'wasm-standalone' : 'wasm-web',
+        sourceFile: sourcePath,
+        emitDebugMetadata: sourceMap,
+      });
+      if (wasm.diagnostics.length > 0) {
+        formatDiagnosticsWithSnippet(source, wasm.diagnostics);
+        return { ok: false };
+      }
+      return emitWasmArtifacts(outPath, wasm.module, emitWat, { sourceMap, inlineSourceMap });
     }
-    await fs.writeFile(outPath, wasm.wat, 'utf-8');
-    const wasmPath = outPath.endsWith('.wat') ? outPath.replace(/\.wat$/, '.wasm') : `${outPath}.wasm`;
-    try {
-      execSync(`wat2wasm "${outPath}" -o "${wasmPath}"`, { stdio: 'inherit' });
-      console.log(`Compiled WASM: ${wasmPath}`);
-    } catch {
-      console.warn('wat2wasm not found. Install wabt to emit .wasm files.');
-    }
-    console.log(`Lumina compiled (wasm): ${outPath}`);
-    return { ok: true, map: undefined, ir: undefined };
-  }
 
     const { ast, diagnostics: parseDiagnostics, parseError } = parseSource(source, parser, useRecovery);
     if (parseError) return { ok: false };
@@ -1892,21 +2009,17 @@ async function compileLumina(
     }
     const monoAst = applyMonomorphize(ast as never);
     if (!monoAst) return { ok: false };
-    const wasm = generateWATFromAst(monoAst as never, { exportMain: true });
+    const wasm = generateWasmTextModuleFromAst(monoAst as never, {
+      exportMain: true,
+      targetProfile: semanticTarget === 'wasm-standalone' ? 'wasm-standalone' : 'wasm-web',
+      sourceFile: sourcePath,
+      emitDebugMetadata: sourceMap,
+    });
     if (wasm.diagnostics.length > 0) {
       formatDiagnosticsWithSnippet(source, wasm.diagnostics);
       return { ok: false };
     }
-    await fs.writeFile(outPath, wasm.wat, 'utf-8');
-    const wasmPath = outPath.endsWith('.wat') ? outPath.replace(/\.wat$/, '.wasm') : `${outPath}.wasm`;
-    try {
-      execSync(`wat2wasm "${outPath}" -o "${wasmPath}"`, { stdio: 'inherit' });
-      console.log(`Compiled WASM: ${wasmPath}`);
-    } catch {
-      console.warn('wat2wasm not found. Install wabt to emit .wasm files.');
-    }
-    console.log(`Lumina compiled (wasm): ${outPath}`);
-    return { ok: true, map: undefined, ir: undefined };
+    return emitWasmArtifacts(outPath, wasm.module, emitWat, { sourceMap, inlineSourceMap });
   }
   if (needsBundling) {
     const bundle = await bundleProgram(
@@ -2162,6 +2275,7 @@ async function compileLumina(
       out = appendSourceMapComment(out, mapFileName);
     }
   }
+  await fs.mkdir(path.dirname(outPath), { recursive: true });
   await fs.writeFile(outPath, out, 'utf-8');
   if (sourceMap && result.map && !inlineSourceMap) {
     const mapPath = outPath + '.map';
@@ -2184,6 +2298,7 @@ async function compileLumina(
     diagnostics: analysis.diagnostics,
     ir: noOptimize ? null : optimized,
     grammarHash: buildCache.grammarHash ?? '',
+    semanticTarget,
   };
   buildCache.files.set(sourcePath, entry);
   await writeDiskCache(sourcePath, entry);
@@ -2195,7 +2310,8 @@ async function checkLumina(
   grammarPath: string,
   useRecovery: boolean,
   diCfg: boolean,
-  stopOnUnresolvedMemberError: boolean
+  stopOnUnresolvedMemberError: boolean,
+  semanticTarget: AnalyzeTarget
 ) {
   const parser = await loadGrammar(grammarPath);
   const source = await fs.readFile(sourcePath, 'utf-8');
@@ -2205,7 +2321,12 @@ async function checkLumina(
   await updateDependenciesForFile(sourcePath, source, configFileExtensions, configStdPath, lockfileRoot);
   const fileHash = hashText(source);
   const cached = buildCache.files.get(sourcePath);
-  if (cached && cached.hash === fileHash && cached.grammarHash === buildCache.grammarHash) {
+  if (
+    cached &&
+    cached.hash === fileHash &&
+    cached.grammarHash === buildCache.grammarHash &&
+    (cached.semanticTarget ?? 'js') === semanticTarget
+  ) {
     buildCache.stats.hits += 1;
     if (cached.diagnostics.length > 0) {
       formatDiagnosticsWithSnippet(source, cached.diagnostics);
@@ -2215,7 +2336,12 @@ async function checkLumina(
     return { ok: true };
   }
   const diskCache = await readDiskCache(sourcePath);
-  if (diskCache && diskCache.hash === fileHash && diskCache.grammarHash === buildCache.grammarHash) {
+  if (
+    diskCache &&
+    diskCache.hash === fileHash &&
+    diskCache.grammarHash === buildCache.grammarHash &&
+    (diskCache.semanticTarget ?? 'js') === semanticTarget
+  ) {
     buildCache.stats.hits += 1;
     buildCache.files.set(sourcePath, diskCache);
     if (diskCache.diagnostics.length > 0) {
@@ -2246,7 +2372,11 @@ async function checkLumina(
     if (!bundle) return { ok: false };
     programForAnalysis = bundle.program;
   }
-  const analysis = analyzeLumina(programForAnalysis as never, { diDebug: diCfg, stopOnUnresolvedMemberError });
+  const analysis = analyzeLumina(programForAnalysis as never, {
+    diDebug: diCfg,
+    stopOnUnresolvedMemberError,
+    target: semanticTarget,
+  });
   const combinedDiagnostics = [...parseDiagnostics, ...analysis.diagnostics];
   if (combinedDiagnostics.length > 0) {
     reportDiagnosticsAndFail(source, combinedDiagnostics);
@@ -2268,6 +2398,7 @@ async function checkLumina(
     diagnostics: combinedDiagnostics as never,
     ir: null,
     grammarHash: buildCache.grammarHash ?? '',
+    semanticTarget,
   };
   buildCache.files.set(sourcePath, entry);
   await writeDiskCache(sourcePath, entry);
@@ -2278,6 +2409,8 @@ async function compileLuminaWithStrategy(
   sourcePath: string,
   outPath: string,
   target: Target,
+  emitWat: boolean,
+  semanticTarget: AnalyzeTarget,
   grammarPath: string,
   useRecovery: boolean,
   diCfg: boolean,
@@ -2295,6 +2428,8 @@ async function compileLuminaWithStrategy(
         sourcePath,
         outPath,
         target,
+        emitWat,
+        semanticTarget,
         grammarPath,
         useRecovery,
         diCfg,
@@ -2310,6 +2445,8 @@ async function compileLuminaWithStrategy(
         sourcePath,
         outPath,
         target,
+        emitWat,
+        semanticTarget,
         grammarPath,
         useRecovery,
         diCfg,
@@ -2327,6 +2464,8 @@ export async function compileLuminaTask(payload: {
   sourcePath: string;
   outPath: string;
   target: Target;
+  emitWat?: boolean;
+  semanticTarget?: AnalyzeTarget;
   grammarPath: string;
   useRecovery: boolean;
   diCfg?: boolean;
@@ -2343,6 +2482,8 @@ export async function compileLuminaTask(payload: {
     payload.sourcePath,
     payload.outPath,
     payload.target,
+    payload.emitWat ?? false,
+    payload.semanticTarget ?? (payload.target === 'wasm' ? 'wasm' : 'js'),
     payload.grammarPath,
     payload.useRecovery,
     payload.diCfg ?? false,
@@ -2363,13 +2504,15 @@ export async function checkLuminaTask(payload: {
   useRecovery: boolean;
   diCfg?: boolean;
   stopOnUnresolvedMemberError?: boolean;
+  semanticTarget?: AnalyzeTarget;
 }) {
   return checkLumina(
     payload.sourcePath,
     payload.grammarPath,
     payload.useRecovery,
     payload.diCfg ?? false,
-    payload.stopOnUnresolvedMemberError ?? false
+    payload.stopOnUnresolvedMemberError ?? false,
+    payload.semanticTarget ?? 'js'
   );
 }
 
@@ -2477,6 +2620,8 @@ async function watchLumina(
   sources: string[],
   outDir: string | undefined,
   target: Target,
+  emitWat: boolean,
+  semanticTarget: AnalyzeTarget,
   grammarPath: string,
   outPathArg?: string,
   useRecovery: boolean = false,
@@ -2516,6 +2661,8 @@ async function watchLumina(
         filePath,
         outPath,
         target,
+        emitWat,
+        semanticTarget,
         grammarPath,
         useRecovery,
         diCfg,
@@ -2533,6 +2680,8 @@ async function watchLumina(
       sourcePath: filePath,
       outPath,
       target,
+      emitWat,
+      semanticTarget,
       grammarPath,
       useRecovery,
       diCfg,
@@ -2693,6 +2842,8 @@ type WorkerRequest =
         sourcePath: string;
         outPath: string;
         target: Target;
+        emitWat?: boolean;
+        semanticTarget?: AnalyzeTarget;
         grammarPath: string;
         useRecovery: boolean;
         diCfg: boolean;
@@ -2739,7 +2890,7 @@ function createWorkerRunner(config: BuildConfig) {
   worker.postMessage({ type: 'init', payload: config } satisfies WorkerRequest);
 
   return {
-    async compile(payload: { sourcePath: string; outPath: string; target: Target; grammarPath: string; useRecovery: boolean; diCfg: boolean; useAstJs?: boolean; noOptimize?: boolean; noInline?: boolean; noComptime?: boolean; sourceMap?: boolean; inlineSourceMap?: boolean; stopOnUnresolvedMemberError?: boolean; useBundledCompile?: boolean }) {
+    async compile(payload: { sourcePath: string; outPath: string; target: Target; emitWat?: boolean; semanticTarget?: AnalyzeTarget; grammarPath: string; useRecovery: boolean; diCfg: boolean; useAstJs?: boolean; noOptimize?: boolean; noInline?: boolean; noComptime?: boolean; sourceMap?: boolean; inlineSourceMap?: boolean; stopOnUnresolvedMemberError?: boolean; useBundledCompile?: boolean }) {
       const id = requestId++;
       return new Promise<{ ok: boolean; error?: string }>((resolve) => {
         pending.set(id, { resolve });
@@ -2783,8 +2934,10 @@ Commands:
   secret-scan [d]  Scan a directory for likely secrets
 
 Options:
-  --out <file>         Output JS file (default: lumina.out.js)
-  --target <cjs|esm|wasm|dual>   Output module format (default: esm)
+  --out <file>         Output file (default: lumina.out.js; wasm target: lumina.out.wasm)
+  --target <js|wasm-web|wasm-standalone|cjs|esm|wasm|dual>   Target profile / legacy target (default: esm)
+  --module <esm|cjs>   JS module format when --target js is used
+  --emit-wat           Emit companion .wat debug output for wasm target
   --loader-out <file>  Loader output path for wasm bundle target
   --import-map <file>  Emit browser import-map.json during bundle
   --minify             Minify browser bundle output
@@ -3208,10 +3361,14 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
       ? (args.get('--grammar') as string)
       : config.grammarPath
   );
-  const target =
+  const cliTarget =
     resolveTarget(args.get('--target') as string | undefined) ??
     config.target ??
     'esm';
+  const moduleFormat =
+    resolveModuleFormat(args.get('--module') as string | undefined) ??
+    config.module;
+  const { compileTarget: target, semanticTarget } = resolveCompilePlan(cliTarget, moduleFormat);
   const outArg = (args.get('--out') as string) ?? undefined;
   const outDir = config.outDir;
   const dryRun = parseBooleanFlag(args, '--dry-run');
@@ -3222,6 +3379,7 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
   const noInline = parseBooleanFlag(args, '--no-inline');
   const noComptime = parseBooleanFlag(args, '--no-comptime');
   const bundledCompile = parseBooleanFlag(args, '--bundled-compile');
+  const emitWat = parseBooleanFlag(args, '--emit-wat');
   parseBooleanFlag(args, '--topo-compile');
   const clearModuleCache = parseBooleanFlag(args, '--clear-cache');
   const stopOnUnresolvedMemberError = parseBooleanFlag(args, '--stop-on-unresolved');
@@ -3263,7 +3421,8 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
       JSON.stringify(
         {
           grammarPath,
-          target,
+          target: cliTarget,
+          module: moduleFormat ?? null,
           outDir,
           entries: config.entries ?? [],
           watch: config.watch ?? [],
@@ -3325,7 +3484,8 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
           grammarPath,
           useRecovery,
           diCfg,
-          stopOnUnresolvedMemberError
+          stopOnUnresolvedMemberError,
+          semanticTarget
         );
         if (!result.ok) process.exit(1);
       } else {
@@ -3333,6 +3493,8 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
           sourcePath,
           outPath,
           target,
+          emitWat,
+          semanticTarget,
           grammarPath,
           useRecovery,
           diCfg,
@@ -3397,7 +3559,8 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
         grammarPath,
         useRecovery,
         diCfg,
-        stopOnUnresolvedMemberError
+        stopOnUnresolvedMemberError,
+        semanticTarget
       );
       if (!result.ok) process.exit(1);
       if (profileCache) {
@@ -3421,6 +3584,8 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
       sources,
       outDir,
       target,
+      emitWat,
+      semanticTarget,
       grammarPath,
       outArg,
       useRecovery,

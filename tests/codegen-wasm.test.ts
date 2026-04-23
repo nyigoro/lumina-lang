@@ -29,6 +29,28 @@ describe('WASM codegen (WAT)', () => {
     expect(result.wat).toContain('(export "main" (func $main))');
   });
 
+  it('lowers float comparisons with f64 comparison ops', () => {
+    const source = `
+      import * as math from "@std/math";
+
+      fn main() -> i32 {
+        if (math.abs(0.0 - 3.5) > 3.0) {
+          return 1;
+        } else {
+          return 0;
+        }
+        return 0;
+      }
+    `.trim() + '\n';
+
+    const ast = parseProgram(source);
+    const result = generateWATFromAst(ast, { exportMain: true });
+    const hardErrors = result.diagnostics.filter((d) => d.severity === 'error');
+    expect(hardErrors).toHaveLength(0);
+    expect(result.wat).toContain('f64.gt');
+    expect(result.wat).not.toContain('i32.gt_s');
+  });
+
   it('lowers zero-payload enum matches to tag comparisons', () => {
     const source = `
       enum Flag {
@@ -250,7 +272,7 @@ describe('WASM codegen (WAT)', () => {
     const result = generateWATFromAst(ast, { exportMain: true });
     const errors = result.diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
-    expect(result.wat).toContain('(if (result i32)');
+    expect(result.wat).toContain('if (result i32)');
     expect(result.wat).toContain('return');
   });
 
@@ -346,7 +368,35 @@ describe('WASM codegen (WAT)', () => {
     const result = generateWATFromAst(ast, { exportMain: true });
     const errors = result.diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
-    expect(result.wat).toContain('(if (result i32)');
+    expect(result.wat).toContain('if (result i32)');
+  });
+
+  it('lowers match statements to structured block branches', () => {
+    const source = `
+      enum Option {
+        Some(i32),
+        None
+      }
+
+      fn main() -> i32 {
+        let opt = Option.Some(2);
+        let mut out = 0;
+        match opt {
+          Some(v) => { out = v; },
+          None => { out = 0; }
+        }
+        out
+      }
+    `.trim() + '\n';
+
+    const ast = parseProgram(source);
+    const result = generateWATFromAst(ast, { exportMain: true });
+    const errors = result.diagnostics.filter((d) => d.severity === 'error');
+    expect(errors).toHaveLength(0);
+    expect(result.wat).toContain('(block $match_end_');
+    expect(result.wat).toContain('br $match_end_');
+    expect(result.wat).toContain('local.set $__match_');
+    expect(result.wat).toContain('local.set $v');
   });
 
   it('routes unknown stdlib module calls through generic host module-call imports', () => {
@@ -525,7 +575,7 @@ describe('WASM codegen (WAT)', () => {
     const errors = result.diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
     expect(result.wat).toContain('(block $match_expr_end_');
-    expect(result.wat).toContain('(if (result i32)');
+    expect(result.wat).toContain('if (result i32)');
     expect(result.wat).toContain('local.set $__match_expr_');
   });
 
@@ -547,7 +597,7 @@ describe('WASM codegen (WAT)', () => {
     expect(result.wat).toContain('return');
   });
 
-  it('emits explicit memory management hooks and allocator exports', () => {
+  it('prunes unused memory hooks while keeping allocator exports', () => {
     const source = `
       import { str } from "@std";
 
@@ -567,9 +617,11 @@ describe('WASM codegen (WAT)', () => {
     const result = generateWATFromAst(ast, { exportMain: true });
     const errors = result.diagnostics.filter((d) => d.severity === 'error');
     expect(errors).toHaveLength(0);
-    expect(result.wat).toContain('(import "env" "mem_retain"');
-    expect(result.wat).toContain('(import "env" "mem_release"');
-    expect(result.wat).toContain('(import "env" "mem_stats_live"');
+    expect(result.wat).not.toContain('(import "env" "mem_retain"');
+    expect(result.wat).not.toContain('(import "env" "mem_release"');
+    expect(result.wat).not.toContain('(import "env" "mem_stats_live"');
+    expect(result.wat).toContain('(import "env" "str_new"');
+    expect(result.wat).toContain('(import "env" "str_concat"');
     expect(result.wat).toContain('(func $free (param $ptr i32)');
     expect(result.wat).toContain('(global $free_head (mut i32)');
     expect(result.wat).toContain('(export "__alloc" (func $alloc))');

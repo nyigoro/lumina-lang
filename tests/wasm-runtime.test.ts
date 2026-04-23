@@ -176,6 +176,32 @@ describe('WASM runtime', () => {
     expect(callWASMFunction(runtime, 'main')).toBe(20);
   });
 
+  it('executes nested GADT matches in WASM', async () => {
+    if (!hasWabt()) return;
+    const source = `
+      enum Expr<T> {
+        Lit(i32): Expr<i32>,
+        Bool(bool): Expr<bool>,
+        If(Expr<bool>, Expr<T>, Expr<T>): Expr<T>
+      }
+
+      fn eval(e: Expr<i32>) -> i32 {
+        return match e {
+          Expr.If(Expr.Bool(true), Expr.Lit(n), _) => n,
+          Expr.Lit(v) => v,
+          _ => 0
+        };
+      }
+
+      fn main() -> i32 {
+        return eval(Expr.If(Expr.Bool(true), Expr.Lit(4), Expr.Lit(9)));
+      }
+    `.trim() + '\n';
+
+    const runtime = await compileAndLoad(source);
+    expect(callWASMFunction(runtime, 'main')).toBe(4);
+  });
+
   it('executes for/while/while-let and match-expression control flow in WASM', async () => {
     if (!hasWabt()) return;
     const source = `
