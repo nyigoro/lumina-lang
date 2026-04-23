@@ -13,21 +13,32 @@ lumina check src/main.lm
 Compile to JavaScript:
 
 ```bash
-lumina compile src/main.lm --target esm --out dist/main.js
+lumina compile src/main.lm --target js --module esm --out dist/main.js
 ```
 
 Compile to CommonJS:
 
 ```bash
-lumina compile src/main.lm --target cjs --ast-js --out dist/main.cjs
+lumina compile src/main.lm --target js --module cjs --out dist/main.cjs
 ```
 
-Compile to WebAssembly (beta):
+Compile to `wasm-web`:
 
 ```bash
-lumina compile src/main.lm --target wasm --out dist/main.wat
-wat2wasm dist/main.wat -o dist/main.wasm
+lumina compile src/main.lm --target wasm-web --out dist/main.wasm
 lumina run-wasm dist/main.wasm main
+```
+
+Compile to `wasm-standalone`:
+
+```bash
+lumina compile src/main.lm --target wasm-standalone --out dist/kernel.wasm
+```
+
+Optional debug WAT:
+
+```bash
+lumina compile src/main.lm --target wasm-web --out dist/main.wasm --emit-wat
 ```
 
 Format, lint, and generate docs:
@@ -140,13 +151,16 @@ Use `lumina.config.json` for defaults:
 {
   "grammarPath": "src/grammar/lumina.peg",
   "outDir": "dist",
-  "target": "esm",
+  "target": "js",
+  "module": "esm",
   "entries": ["src/main.lm"],
   "fileExtensions": [".lm", ".lumina"]
 }
 ```
 
 Schema: `lumina.config.schema.json`
+
+Preferred targets are `js`, `wasm-web`, and `wasm-standalone`. Legacy aliases like `esm`, `cjs`, and `wasm` still work for compatibility.
 
 ## Recommended CI Commands
 

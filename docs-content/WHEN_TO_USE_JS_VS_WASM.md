@@ -1,50 +1,64 @@
 # When to Use JS vs WASM
 
-Lumina supports both JavaScript and WebAssembly because they solve different problems well.
+Lumina supports JavaScript and WebAssembly because the web is already a hybrid platform. The practical target profiles are:
+
+- `js` for platform glue, browser and Node interop, and the fastest edit-debug loop
+- `wasm-web` for shared browser-native systems code that still uses explicit web host capabilities
+- `wasm-standalone` for the strict portable subset with tighter capability boundaries
+
+Legacy aliases like `esm`, `cjs`, and `wasm` still work, but the target profiles above are the preferred way to think about deployment.
 
 ## Use the JS Target When
 
 - you want the fastest edit-run-debug loop
 - you are doing heavy browser or Node interop
-- you want the simplest deployment path
+- you are building the app shell, routing layer, or platform-facing glue code
 - your app is UI-heavy and not bottlenecked by compute
 - you want the easiest stack traces and source-level debugging today
 
-## Use the WASM Target When
+## Use the `wasm-web` Target When
 
 - you have compute-heavy hot paths
 - you want worker-isolated execution in the browser
+- you want shared-core parity with JS for strings, collections, control flow, traits, enums, and async behavior
 - startup cost and binary size are acceptable tradeoffs for runtime behavior
 - you are building browser-native systems code, simulations, parsers, or numeric workloads
-- you want the web-native execution path Lumina is prioritizing most aggressively
+
+## Use the `wasm-standalone` Target When
+
+- you want an import-light kernel or portable compute module
+- you need stricter capability boundaries than `wasm-web`
+- you are targeting embedders or WASI-style hosts
+- you are willing to stay inside the standalone-supported runtime surface
 
 ## Use Both When
 
 - your UI shell benefits from JS interop, but specific workloads benefit from WASM
-- you want to prototype on JS first, then move critical paths to WASM
-- you need one language across app code and browser compute modules
+- you want to keep browser and Node platform work on `js` while pushing shared compute to `wasm-web`
+- you need one language across app code, workers, and browser compute modules
 
 ## Practical Guidance
 
-Start with JS unless you already know the workload is compute-heavy or worker-heavy.
+Start with `js` when most of the work is platform-facing, UI-heavy, or integration-heavy.
 
-Move to WASM when:
+Move shared workloads to `wasm-web` when:
 
 - profiling points to CPU-bound work
+- worker isolation helps the architecture
 - bundle size remains acceptable
-- the target environment supports the browser features you need
+- you still need browser host capabilities through explicit imports
 
-Stay on JS when:
+Choose `wasm-standalone` when:
 
-- most of the value is in UI iteration speed
-- the app is mainly glue code around existing JS libraries
-- debugging speed matters more than runtime isolation
+- the module should compile and run with a stricter capability profile
+- you want import-free or import-light behavior where Lumina already supports it
+- you are treating the module more like a portable kernel than an app shell
 
 ## Rule of Thumb
 
-- JS is the default delivery target.
-- WASM is the performance and systems target.
-- Lumina is strongest when you can choose between them without changing languages.
+- `js` owns browser and Node glue.
+- `wasm-web` is the main systems target for browser-native Lumina code.
+- `wasm-standalone` is the strict portable profile, not the default shape of the whole web app.
 
 ## Read Next
 

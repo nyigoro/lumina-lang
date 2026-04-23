@@ -41,7 +41,7 @@ fn main() -> void {
 
 ```bash
 lumina check hello.lm
-lumina compile hello.lm --target cjs --ast-js --out hello.cjs
+lumina compile hello.lm --target js --module cjs --out hello.cjs
 node hello.cjs
 ```
 
@@ -63,14 +63,14 @@ lumina doc "src/**/*.lm" --out API.md
 ## 6. Optional: WASM Quick Run
 
 ```bash
-lumina compile examples/wasm-hello/math.lm --target wasm --out math.wat
-wat2wasm math.wat -o math.wasm
+lumina compile examples/wasm-hello/math.lm --target wasm-web --out math.wasm
 lumina run-wasm math.wasm main
 ```
 
 Notes:
-- `wat2wasm` (from WABT) is required for `.wat` -> `.wasm`.
-- WASM backend is currently beta.
+- Lumina now emits `.wasm` directly.
+- Add `--emit-wat` when you want a debug `.wat` sidecar.
+- Use `--target wasm-standalone` for strict import-light modules that stay inside the standalone-supported runtime surface.
 
 ## 7. VS Code
 

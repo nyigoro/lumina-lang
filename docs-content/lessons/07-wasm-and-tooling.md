@@ -17,9 +17,14 @@ node math.cjs
 WASM:
 
 ```bash
-lumina compile examples/wasm-hello/math.lm --target wasm --out math.wat
-wat2wasm math.wat -o math.wasm
+lumina compile examples/wasm-hello/math.lm --target wasm-web --out math.wasm
 lumina run-wasm math.wasm main
+```
+
+Optional debug output:
+
+```bash
+lumina compile examples/wasm-hello/math.lm --target wasm-web --out math.wasm --emit-wat
 ```
 
 ## Basic Benchmark Pattern
@@ -55,4 +60,4 @@ Build a small numeric app with:
 - one trait impl,
 - one `Result` flow with `?`,
 - one `Vec` pipeline,
-- and both JS + WASM compile runs.
+- and both `js` + `wasm-web` compile runs.

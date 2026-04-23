@@ -79,6 +79,12 @@ match await io.readLineAsync() {
 
 ## @std/str
 
+### Target Notes
+
+- `js` and `wasm-web` share the broader runtime-backed string surface.
+- `wasm-standalone` currently supports string literals, `str.concat`, `str.length`, equality, and range slicing without host imports.
+- Richer host-backed string helpers should stay on `js` or `wasm-web` until standalone-native versions land.
+
 ### length(s: String) -> Int
 Returns the length of a string.
 

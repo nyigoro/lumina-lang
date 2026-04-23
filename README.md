@@ -6,7 +6,7 @@
 
 Most languages make you choose: safety or the web. Lumina doesn't.
 
-Lumina is a statically typed, web-native language with HM type inference, algebraic types, and trait-based polymorphism, compiled to JavaScript and WebAssembly. Build reactive UIs, WebGPU workloads, and WASM modules in the same language, with the same type system.
+Lumina is a statically typed, web-native language with HM type inference, algebraic types, and trait-based polymorphism, compiled to JavaScript and WebAssembly. It ships first-class `js`, `wasm-web`, and `wasm-standalone` target profiles so you can keep browser and platform glue on JS while pushing shared systems code to WASM.
 
 ## At a Glance
 
@@ -52,8 +52,8 @@ Run the basic workflow:
 
 ```bash
 lumina check hello.lm
-lumina compile hello.lm --target esm --out hello.js
-node hello.js
+lumina compile hello.lm --target js --module cjs --out hello.cjs
+node hello.cjs
 ```
 
 Start the REPL:
@@ -87,8 +87,9 @@ lumina repl
 
 ## Choosing a Target
 
-- Use the JS target when you want the fastest edit-run-debug loop, deep browser/Node interop, or straightforward deployment.
-- Use the WASM target when you want tighter runtime behavior, compute-heavy hot paths, or worker-isolated browser execution.
+- Use `js` when you want the fastest edit-run-debug loop, deep browser/Node interop, or an app shell that talks directly to browser and Node APIs.
+- Use `wasm-web` when you want shared-core parity with JS, tighter runtime behavior, or worker-isolated browser execution for compute-heavy paths.
+- Use `wasm-standalone` when you want the strict portable profile for import-light kernels, embedders, or WASI-style environments.
 
 [Read: When to use JS vs WASM](https://nyigoro.abrdns.com/docs/#/js-vs-wasm)
 
@@ -96,7 +97,8 @@ lumina repl
 
 - `lumina` CLI for check, compile, run, grammar, bundle, and REPL workflows
 - `lumina repl` with multiline input, history, and persistent declarations
-- JS and WASM targets
+- `js`, `wasm-web`, and `wasm-standalone` targets
+- Direct `.wasm` emission with optional `--emit-wat` debug output
 - Reactive UI runtime and browser demo
 - `lumina-lsp` plus a VS Code extension
 
