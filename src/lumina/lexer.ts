@@ -98,7 +98,7 @@ export const luminaSyncTokenTypes: TokenType[] = ['semicolon', 'rbrace'];
 type MooToken = moo.Token & { type: TokenType };
 
 const luminaKeywords = new Set([
-  'import', 'from', 'type', 'struct', 'enum', 'fn', 'let', 'return',
+  'import', 'from', 'type', 'struct', 'enum', 'fn', 'component', 'let', 'return',
   'if', 'else', 'for', 'while', 'match', 'true', 'false',
   'pub', 'extern', 'as', 'async', 'await', 'ref', 'mut', 'move', 'is',
   'try', 'comptime', 'macro_rules', 'where', 'in', 'break', 'continue',

@@ -1059,6 +1059,7 @@ class WasmBuilder {
   private loopContinueLabels: string[] = [];
   private lambdaCounter = 0;
   private lambdaByExprId = new Map<number, WasmLambdaInfo>();
+  private nestedFnByDecl = new WeakMap<LuminaFnDecl, WasmLambdaInfo>();
   private synthesizedLambdas: WasmLambdaInfo[] = [];
   private targetProfile: 'wasm' | 'wasm-web' | 'wasm-standalone';
 
@@ -1291,6 +1292,138 @@ class WasmBuilder {
     return info;
   }
 
+  private getOrCreateNestedFunctionInfo(fn: LuminaFnDecl): WasmLambdaInfo {
+    const existing = this.nestedFnByDecl.get(fn);
+    if (existing) return existing;
+
+    const lambda = {
+      type: 'Lambda',
+      async: !!fn.async,
+      params: fn.params,
+      returnType: fn.returnType,
+      body: fn.body,
+      typeParams: fn.typeParams ?? [],
+      location: fn.location,
+    } as Extract<LuminaExpr, { type: 'Lambda' }>;
+
+    const captures = this.resolveLambdaCaptures(lambda);
+    const captureTypes = captures.map((name) => this.currentLocalTypes.get(name) ?? ({ kind: 'primitive', name: 'i32' } as Type));
+    const info: WasmLambdaInfo = {
+      id: ++this.lambdaCounter,
+      fnName: `__local_fn_${sanitizeWasmIdent(fn.name)}_${this.lambdaCounter}`,
+      lambda,
+      captures,
+      captureTypes,
+    };
+    const paramTypes = fn.params.map(
+      (param) => this.typeExprToPatternType(param.typeName ?? undefined) ?? ({ kind: 'primitive', name: 'any' } as Type)
+    );
+    this.fnParamTypes.set(info.fnName, [...captureTypes, ...paramTypes]);
+    this.synthesizedLambdas.push(info);
+    this.nestedFnByDecl.set(fn, info);
+    return info;
+  }
+
+  private functionDeclToFunctionType(fn: LuminaFnDecl): Type {
+    const args = fn.params.map(
+      (param) => this.typeExprToPatternType(param.typeName ?? undefined) ?? ({ kind: 'primitive', name: 'any' } as Type)
+    );
+    const returnType =
+      (fn.returnType ? this.typeExprToPatternType(fn.returnType) : undefined) ??
+      ({ kind: 'primitive', name: 'void' } as Type);
+    return { kind: 'function', args, returnType };
+  }
+
+  private emitNestedFunctionHoistsText(statements: LuminaStatement[]): string[] {
+    const nestedFns = statements.filter((stmt): stmt is LuminaFnDecl => stmt.type === 'FnDecl');
+    if (nestedFns.length === 0) return [];
+
+    for (const fn of nestedFns) {
+      this.currentLocalTypes.set(fn.name, this.functionDeclToFunctionType(fn));
+    }
+
+    const infos = nestedFns.map((fn) => {
+      const info = this.getOrCreateNestedFunctionInfo(fn);
+      this.localLambdaBindings.set(fn.name, info);
+      return { fn, info };
+    });
+
+    const lines: string[] = [];
+    for (const { fn, info } of infos) {
+      const envSize = 8 + info.captures.length * 8;
+      lines.push(`i32.const ${envSize}`);
+      lines.push('call $alloc');
+      lines.push(`local.tee $${fn.name}`);
+      lines.push(`i32.const ${info.id}`);
+      lines.push('i32.store');
+      lines.push(`local.get $${fn.name}`);
+      lines.push('i32.const 4');
+      lines.push('i32.add');
+      lines.push(`i32.const ${info.captures.length}`);
+      lines.push('i32.store');
+    }
+
+    for (const { fn, info } of infos) {
+      for (let i = 0; i < info.captures.length; i += 1) {
+        const captureName = info.captures[i];
+        const captureType = info.captureTypes[i];
+        const wasmType = this.typeToWasm(captureType, fn.location) ?? 'i32';
+        lines.push(`local.get $${fn.name}`);
+        lines.push(`i32.const ${8 + i * 8}`);
+        lines.push('i32.add');
+        lines.push(`local.get $${captureName}`);
+        lines.push(`${wasmType}.store`);
+      }
+    }
+
+    return lines;
+  }
+
+  private emitNestedFunctionHoistsInstructions(statements: LuminaStatement[]): WasmTextInstruction[] {
+    const nestedFns = statements.filter((stmt): stmt is LuminaFnDecl => stmt.type === 'FnDecl');
+    if (nestedFns.length === 0) return [];
+
+    for (const fn of nestedFns) {
+      this.currentLocalTypes.set(fn.name, this.functionDeclToFunctionType(fn));
+    }
+
+    const infos = nestedFns.map((fn) => {
+      const info = this.getOrCreateNestedFunctionInfo(fn);
+      this.localLambdaBindings.set(fn.name, info);
+      return { fn, info };
+    });
+
+    const instructions: WasmTextInstruction[] = [];
+    for (const { fn, info } of infos) {
+      const envSize = 8 + info.captures.length * 8;
+      instructions.push(wasmOp('i32.const', envSize));
+      instructions.push(wasmOp('call', '$alloc'));
+      instructions.push(wasmOp('local.tee', `$${fn.name}`));
+      instructions.push(wasmOp('i32.const', info.id));
+      instructions.push(wasmOp('i32.store'));
+      instructions.push(wasmOp('local.get', `$${fn.name}`));
+      instructions.push(wasmOp('i32.const', 4));
+      instructions.push(wasmOp('i32.add'));
+      instructions.push(wasmOp('i32.const', info.captures.length));
+      instructions.push(wasmOp('i32.store'));
+    }
+
+    for (const { fn, info } of infos) {
+      for (let i = 0; i < info.captures.length; i += 1) {
+        const captureName = info.captures[i];
+        const captureType = info.captureTypes[i];
+        const wasmType = this.typeToWasm(captureType, fn.location) ?? 'i32';
+        instructions.push(wasmOp('local.get', `$${fn.name}`));
+        instructions.push(wasmOp('i32.const', 8 + i * 8));
+        instructions.push(wasmOp('i32.add'));
+        instructions.push(wasmOp('local.get', `$${captureName}`));
+        instructions.push(wasmOp(`${wasmType}.store`));
+      }
+    }
+
+    return instructions;
+  }
+
   private resolveLambdaCaptures(lambda: Extract<LuminaExpr, { type: 'Lambda' }>): string[] {
     if (Array.isArray(lambda.captures) && lambda.captures.length > 0) {
       return lambda.captures.filter((name) => this.currentLocalTypes.has(name));
@@ -1309,7 +1442,7 @@ class WasmBuilder {
           visitExpr(expr.right, scope);
           return;
         case 'Call':
-          if (!expr.receiver && !expr.enumName && expr.callee.type !== 'Identifier') {
+          if (!expr.receiver && !expr.enumName) {
             visitExpr(expr.callee, scope);
           }
           if (expr.receiver) visitExpr(expr.receiver, scope);
@@ -2043,6 +2176,8 @@ class WasmBuilder {
         }
       } else if (stmt.type === 'Block') {
         stmt.body?.forEach(walk);
+      } else if (stmt.type === 'FnDecl') {
+        addLocal(stmt.name, 'i32');
       } else if (stmt.type === 'Assign') {
         if (stmt.target.type === 'Member') walkExpr(stmt.target.object);
         walkExpr(stmt.value);
@@ -2113,6 +2248,7 @@ class WasmBuilder {
       this.localLambdaBindings = new Map(savedLambdas);
     }
     const instructions: WasmTextInstruction[] = [];
+    instructions.push(...this.emitNestedFunctionHoistsInstructions(statements));
     for (let idx = 0; idx < statements.length; idx += 1) {
       const stmt = statements[idx];
       switch (stmt.type) {
@@ -2250,11 +2386,6 @@ class WasmBuilder {
           instructions.push(wasmOp('nop'));
           break;
         case 'FnDecl':
-          this.reportCodegenError(
-            `nested function declaration '${stmt.name}' inside executable block is not supported by the WASM backend`,
-            stmt.location,
-            'WASM-STMT-001'
-          );
           instructions.push(wasmOp('nop'));
           break;
         case 'Block':
@@ -2475,6 +2606,7 @@ class WasmBuilder {
       this.localLambdaBindings = new Map(savedLambdas);
     }
     const lines: string[] = [];
+    lines.push(...this.emitNestedFunctionHoistsText(statements));
     for (let idx = 0; idx < statements.length; idx += 1) {
       const stmt = statements[idx];
       switch (stmt.type) {
@@ -2613,11 +2745,6 @@ class WasmBuilder {
           lines.push('nop');
           break;
         case 'FnDecl':
-          this.reportCodegenError(
-            `nested function declaration '${stmt.name}' inside executable block is not supported by the WASM backend`,
-            stmt.location,
-            'WASM-STMT-001'
-          );
           lines.push('nop');
           break;
         case 'Block':

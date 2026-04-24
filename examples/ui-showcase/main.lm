@@ -1,0 +1,54 @@
+import { render } from "@std";
+import { button, card, tabsListStyled, tabsTriggerStyled, tabsPanelStyled, presenceCard } from "@std/ui";
+
+pub fn app() -> VNode {
+  let active = render.state("overview");
+  let open = render.state(true);
+
+  let toggle = button(
+    render.props_on_click(fn() -> void {
+      if (render.get(open) == false) {
+        let _ = render.set(open, true)
+      } else {
+        let _ = render.set(open, false)
+      }
+    }),
+    [render.text("Toggle insight")]
+  )
+
+  card(
+    render.props_class("mx-auto mt-12 flex w-[min(92vw,60rem)] flex-col gap-6"),
+    [
+      render.element("div", 0, [
+        render.element("p", render.props_class("text-sm font-semibold uppercase tracking-[0.28em] text-sky-600"), [render.text("LUMINA UI")]),
+        render.element("h1", render.props_class("mt-3 text-5xl font-semibold tracking-tight text-slate-950"), [render.text("Styled headless workspace")]),
+        render.element("p", render.props_class("mt-3 max-w-2xl text-lg text-slate-600"), [
+          render.text("The ui layer wraps the headless runtime with Tailwind-style defaults and transition-aware surfaces.")
+        ])
+      ]),
+      toggle,
+      render.tabsRoot(active, || [
+        tabsListStyled(render.props_class("mb-2"), || [
+          tabsTriggerStyled("overview", 0, [render.text("Overview")]),
+          tabsTriggerStyled("activity", 0, [render.text("Activity")])
+        ]),
+        tabsPanelStyled("overview", 0, [
+          presenceCard(open, render.props_class("rounded-2xl bg-sky-50 p-5 text-slate-700"), [
+            render.text("Transitions, styling, and keyed UI composition now ship together.")
+          ])
+        ]),
+        tabsPanelStyled("activity", 0, [
+          render.text("Use this example as a starting point for styled Lumina UI apps.")
+        ])
+      ])
+    ]
+  )
+}
+
+pub fn main() -> void {
+  let container = render.dom_get_element_by_id("root")
+  let renderer = render.createDomRenderer()
+  let _mounted = render.mount_reactive(renderer, container, || app())
+}
+
+main()

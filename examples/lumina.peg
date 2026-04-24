@@ -30,7 +30,7 @@
 
   function expectedStatementTokens() {
     return [
-      "fn", "async", "comptime", "struct", "enum", "type", "extern", "import", "pub", "trait", "impl", "macro_rules", "shader",
+      "fn", "component", "async", "comptime", "struct", "enum", "type", "extern", "import", "pub", "trait", "impl", "macro_rules", "shader",
       "let", "if", "while", "match", "return", "break", "continue",
       "identifier", "number", "string", "true", "false",
       "{", "}"
@@ -81,7 +81,7 @@ RecoverableStatement
   / error:InvalidStatement { return error; }
 
 SyncKeyword
-  = "fn" / "async" / "comptime" / "struct" / "enum" / "type" / "extern" / "import" / "pub" / "trait" / "impl" / "shader"
+  = "fn" / "component" / "async" / "comptime" / "struct" / "enum" / "type" / "extern" / "import" / "pub" / "trait" / "impl" / "shader"
 
 InvalidStatement
   = tokens:(!(";" / "}" / SyncKeyword) .)+ (";" / &"}" / &SyncKeyword / !.) {
@@ -412,7 +412,7 @@ TypePath
   = head:IdName tail:(_ "::" _ IdName)* { return [head.name].concat(tail.map(t => t[3].name)); }
 
 FnDecl
-  = attrs:OuterAttr* visibility:Visibility? _ mods:FnModifiers? "fn" _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ body:Block {
+  = attrs:OuterAttr* visibility:Visibility? _ mods:FnModifiers? ("fn" / "component") _ node:IdName _ tparams:TypeParams? _ "(" _ params:ParamList? _ ")" _ ret:ReturnType? _ whereInfo:WhereClause? _ body:Block {
       const fnDecl = { name: node.name, async: !!mods?.async, params: params || [], returnType: ret || null, whereClauses: whereInfo ? whereInfo.constClauses : [], whereTypeBounds: whereInfo ? whereInfo.typeBounds : [], body, typeParams: tparams || [], visibility: visibility ?? "private", extern: false, attributes: normalizeAttributes(attrs), location: node.location };
       if (mods?.comptime) fnDecl.comptime = true;
       return createNode("FnDecl", fnDecl, location);

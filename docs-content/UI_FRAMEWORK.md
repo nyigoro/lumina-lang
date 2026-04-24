@@ -27,7 +27,16 @@ Today the repo includes:
 - typed shared-state helpers in `@std/store`
 - controlled form helpers and lightweight validation utilities in `@std/forms`
 - cached async resource helpers in `@std/resource`
+- app-level `renderApp`, `renderToStringApp`, `mountApp`, and `hydrateApp` wrappers
+- lightweight DOM-oriented test helpers in `@std/testing`
+- role/text-oriented DOM testing queries in `@std/testing`
+- basic custom-element mounting and registry helpers for Web Components interop
+- `component` declaration syntax as an authoring-friendly alias for component functions
 - suspense and error-boundary render helpers
+- transition-presence helpers for CSS-first mount/unmount animation flows
+- devtools snapshot/install helpers for signal, resource, and frame inspection
+- SSG helpers for app/page rendering and file emission
+- a first styled Tailwind-oriented `@std/ui` layer on top of the headless primitives
 - headless DOM primitives in `@std/tabs`, `@std/dialog`, `@std/popover`, `@std/tooltip`, `@std/toast`, `@std/menu`, `@std/select`, `@std/combobox`, `@std/multiselect`, `@std/checkbox`, and `@std/radio`
 
 That foundation is now strong enough to support real headless UI authoring, but the broader app/framework layer is still intentionally incomplete.
@@ -199,6 +208,11 @@ The current shipped baseline is:
 - radio group/item/indicator primitives with ARIA wiring, roving focus, and arrow-key navigation
 - forms helpers for controlled values, checked state, submit handling, and lightweight validation
 - store helpers for app-level signals, derived memo slices, and context-backed sharing
+- testing helpers for mount, hydrate, events, text queries, and role queries
+- transition presence helpers for CSS-first enter/exit state management
+- devtools helpers for signal/resource/frame snapshots and browser install hooks
+- SSG helpers for page wrapping, app rendering, and static file writing
+- a first `@std/ui` styled layer with Tailwind-oriented wrappers over headless primitives
 
 The next goal is to widen that baseline while staying visually unopinionated.
 
@@ -246,9 +260,9 @@ Lumina's ideal UI framework should explicitly avoid a few traps:
 
 The practical build order should be:
 
-1. expand the headless primitive set from tabs/dialog/popover/tooltip/toast/menu/select/checkbox/radio to combobox and richer multiselect foundations, while continuing to mature the newly added forms/store layer
-2. strengthen app-level APIs such as async resources, richer validation/state ergonomics, and error handling
-3. continue portability and backend parity work where the framework currently leans JS/DOM-first
+1. continue portability and backend parity work where the framework currently leans JS/DOM-first
+2. deepen the testing/devtools surface so app-level workflows are easier to validate and inspect
+3. mature transitions, styled wrappers, and example coverage around the shipped headless/app stack
 4. add optional syntax sugar only if it clearly improves authoring without hiding the runtime model
 
 ## Summary

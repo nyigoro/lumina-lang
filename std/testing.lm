@@ -1,0 +1,61 @@
+import { render } from "@std";
+
+pub fn createDomHarness() -> any {
+  render.testingCreateDomHarness()
+}
+
+pub fn mountApp<P>(harness: any, renderFn: fn(P) -> VNode, props: P) -> ReactiveRenderRoot {
+  render.testingMountApp(harness, renderFn, props)
+}
+
+pub fn hydrateApp<P>(harness: any, renderFn: fn(P) -> VNode, props: P) -> ReactiveRenderRoot {
+  render.testingHydrateApp(harness, renderFn, props)
+}
+
+pub fn container(harness: any) -> any {
+  render.testingContainer(harness)
+}
+
+pub fn body(harness: any) -> any {
+  render.testingBody(harness)
+}
+
+pub fn getById(harness: any, id: string) -> any {
+  render.testingGetById(harness, id)
+}
+
+pub fn getByText(scope: any, value: string) -> any {
+  render.testingGetByText(scope, value)
+}
+
+pub fn getByRole(scope: any, role: string) -> any {
+  render.testingGetByRole(scope, role)
+}
+
+pub fn queryAllByRole(scope: any, role: string) -> any {
+  render.testingQueryAllByRole(scope, role)
+}
+
+pub fn text(node: any) -> string {
+  render.testingTextContent(node)
+}
+
+pub fn click(node: any) -> void {
+  render.testingClick(node)
+}
+
+pub fn input(node: any, value: string) -> void {
+  render.testingInput(node, value)
+}
+
+pub fn changeChecked(node: any, checked: bool) -> void {
+  render.testingChangeChecked(node, checked)
+}
+
+pub fn keydown(node: any, key: string, shiftKey: bool) -> void {
+  render.testingKeydown(node, key, shiftKey)
+}
+
+pub fn submit(node: any) -> void {
+  render.testingSubmit(node)
+}

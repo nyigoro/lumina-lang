@@ -62,4 +62,71 @@ describe('WASM codegen gap closures', () => {
     expect(result.diagnostics.some((d) => d.code === 'WASM-RANGE-002')).toBe(false);
     expect(result.wat).toContain('arr_slice_loop_');
   });
+
+  it('lowers nested local functions without WASM-STMT-001', () => {
+    const source = `
+      fn main() -> i32 {
+        let value = add1(4);
+        fn add1(x: i32) -> i32 { x + 1 }
+        value
+      }
+    `.trim() + '\n';
+
+    const result = generateWATFromAst(parseProgram(source));
+    expect(result.diagnostics.some((d) => d.code === 'WASM-STMT-001')).toBe(false);
+    expect(result.wat).toContain('local.tee $add1');
+    expect(result.wat).toContain('call $__local_fn_add1_');
+  });
+
+  it('lowers mutually recursive nested local functions via closures', () => {
+    const source = `
+      fn main() -> i32 {
+        let ok = even(4);
+        fn even(n: i32) -> bool {
+          if (n == 0) { return true; }
+          odd(n - 1)
+        }
+        fn odd(n: i32) -> bool {
+          if (n == 0) { return false; }
+          even(n - 1)
+        }
+        if (ok) { return 1; }
+        0
+      }
+    `.trim() + '\n';
+
+    const result = generateWATFromAst(parseProgram(source));
+    expect(result.diagnostics.some((d) => d.code === 'WASM-STMT-001')).toBe(false);
+    expect(result.wat).toContain('local.tee $even');
+    expect(result.wat).toContain('local.tee $odd');
+    expect(result.wat).toContain('call $closure_call1');
+  });
+
+  it('accepts the core component/state render subset on wasm-web', () => {
+    const source = `
+      import { render } from "@std";
+
+      component Counter(label: string) -> VNode {
+        let count = render.state(1);
+        fn inc() -> void {
+          let _did = render.set(count, render.get(count) + 1);
+        }
+        render.element("button", render.props_on_click(inc), [
+          render.text(label),
+          render.text(render.get(count))
+        ])
+      }
+
+      fn main() -> VNode {
+        render.renderApp(fn(label: string) -> VNode {
+          Counter(label)
+        }, "Clicks")
+      }
+    `.trim() + '\n';
+
+    const result = generateWATFromAst(parseProgram(source), { targetProfile: 'wasm-web' });
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0);
+    expect(result.wat).toContain('call $module_call');
+    expect(result.wat).toContain('(func $__local_fn_inc_');
+  });
 });

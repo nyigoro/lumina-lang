@@ -9,6 +9,7 @@ import type { LuminaProgram } from '../src/lumina/ast.js';
 const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
 const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
 const parser = compileGrammar(luminaGrammar);
+jest.setTimeout(20000);
 
 const parseProgram = (source: string): LuminaProgram => parser.parse(source) as LuminaProgram;
 

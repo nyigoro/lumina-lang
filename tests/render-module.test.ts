@@ -249,4 +249,115 @@ describe('@std/render module', () => {
     const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
     expect(semanticErrors).toHaveLength(0);
   });
+
+  it('typechecks app SSR and testing helpers in the render namespace', () => {
+    const source = `
+      import { render } from "@std";
+
+      fn app(label: string) -> VNode {
+        let count = render.state(1);
+        render.element("button", render.props_on_click(fn() -> void {
+          render.set(count, render.get(count) + 1)
+        }), [render.text(label), render.text(render.get(count))])
+      }
+
+      fn main() -> string {
+        let harness = render.testingCreateDomHarness();
+        let _node = render.renderApp(fn(label: string) -> VNode {
+          app(label)
+        }, "Clicks");
+        let _html = render.renderToStringApp(fn(label: string) -> VNode {
+          app(label)
+        }, "Clicks");
+        let mounted = render.testingMountApp(harness, fn(label: string) -> VNode {
+          app(label)
+        }, "Clicks");
+        let button = render.testingGetById(harness, "counter");
+        let _text = render.testingGetByText(harness, "Clicks");
+        let _role = render.testingGetByRole(harness, "button");
+        let _roles = render.testingQueryAllByRole(harness, "button");
+        let _transition = render.transitionPresence(render.signal(true), render.props_empty(), 120, fn() -> any {
+          "fade"
+        });
+        let _devtools = render.devtoolsSnapshot();
+        let _installed = render.installDevtools();
+        render.testingClick(button);
+        render.testingInput(button, "Ada");
+        render.testingKeydown(button, "Enter", false);
+        render.testingSubmit(button);
+        render.dispose_reactive(mounted);
+        let hydrated = render.testingHydrateApp(harness, fn(label: string) -> VNode {
+          app(label)
+        }, "Clicks");
+        render.dispose_reactive(hydrated);
+        render.testingTextContent(render.testingBody(harness))
+      }
+    `.trim() + '\n';
+
+    const ast = parseLuminaProgram(source);
+    const analysis = analyzeLumina(ast);
+    const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(semanticErrors).toHaveLength(0);
+
+    const inferred = inferProgram(ast);
+    const hmErrors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(hmErrors).toHaveLength(0);
+  });
+
+  it('typechecks component keyword authoring with render wrappers', () => {
+    const source = `
+      import { renderToStringApp } from "@std/render";
+      import { render } from "@std";
+
+      component Counter(label: string) -> VNode {
+        let count = render.state(1);
+        render.element("button", render.props_on_click(fn() -> void {
+          render.set(count, render.get(count) + 1)
+        }), [render.text(label), render.text(render.get(count))])
+      }
+
+      fn main() -> string {
+        renderToStringApp(fn(label: string) -> VNode {
+          Counter(label)
+        }, "Clicks")
+      }
+    `.trim() + '\n';
+
+    const ast = parseLuminaProgram(source);
+    const analysis = analyzeLumina(ast);
+    const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(semanticErrors).toHaveLength(0);
+
+    const inferred = inferProgram(ast);
+    const hmErrors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(hmErrors).toHaveLength(0);
+  });
+
+  it('typechecks web component interop helpers', () => {
+    const source = `
+      import { render } from "@std";
+
+      component Badge(label: string) -> VNode {
+        render.element("span", render.props_class("badge"), [render.text(label)])
+      }
+
+      fn main() -> void {
+        let _defined = render.defineCustomElement("lumina-badge", fn(label: string) -> VNode {
+          Badge(label)
+        }, render.props_empty());
+        let _mounted = render.mountCustomElement(render.props_empty(), fn(label: string) -> VNode {
+          Badge(label)
+        }, render.props_empty());
+      }
+    `.trim() + '\n';
+
+    const ast = parseLuminaProgram(source);
+    const analysis = analyzeLumina(ast);
+    const semanticErrors = analysis.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(semanticErrors).toHaveLength(0);
+
+    const inferred = inferProgram(ast);
+    const hmErrors = inferred.diagnostics.filter((diag) => diag.severity === 'error');
+    expect(hmErrors).toHaveLength(0);
+  });
 });

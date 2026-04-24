@@ -1,0 +1,17 @@
+import { render } from "@std";
+
+pub fn page(body: any, options: any) -> string {
+  render.ssgPage(body, options)
+}
+
+pub fn renderApp<P>(renderFn: fn(P) -> VNode, props: P, options: any) -> string {
+  render.ssgRenderApp(renderFn, props, options)
+}
+
+pub fn writePage(filePath: string, body: any, options: any) -> string {
+  render.ssgWritePage(filePath, body, options)
+}
+
+pub fn writeApp<P>(filePath: string, renderFn: fn(P) -> VNode, props: P, options: any) -> string {
+  render.ssgWriteApp(filePath, renderFn, props, options)
+}

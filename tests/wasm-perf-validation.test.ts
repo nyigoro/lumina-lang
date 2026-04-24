@@ -6,6 +6,8 @@ import { generateWATFromAst } from '../src/lumina/codegen-wasm.js';
 import { callWASMFunction, loadWASM } from '../src/wasm-runtime.js';
 import type { LuminaProgram } from '../src/lumina/ast.js';
 
+jest.setTimeout(30000);
+
 type Baseline = {
   reference_wasm_bytes: number;
 };

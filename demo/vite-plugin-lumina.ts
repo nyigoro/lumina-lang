@@ -12,7 +12,36 @@ type CompilerModule = {
 };
 
 const importStatementRegex = /^\s*import\s+.+?from\s+["']([^"']+)["'];?\s*$/gm;
-const sourceBackedStdModules = new Set(['router']);
+const sourceBackedStdModules = new Set([
+  'router',
+  'forms',
+  'store',
+  'resource',
+  'tabs',
+  'dialog',
+  'popover',
+  'tooltip',
+  'toast',
+  'menu',
+  'select',
+  'combobox',
+  'multiselect',
+  'checkbox',
+  'radio',
+  'testing',
+  'devtools',
+  'ssg',
+  'ui',
+  'web_components',
+]);
+
+const resolveStdModulePath = (repoRoot: string, moduleName: string): string | null => {
+  if (!sourceBackedStdModules.has(moduleName)) {
+    return null;
+  }
+  const stdlibPath = path.join(repoRoot, 'std', `${moduleName}.lm`);
+  return fs.existsSync(stdlibPath) ? stdlibPath : null;
+};
 
 const normalizeSpecifier = (fromDir: string, toFile: string): string => {
   let relativePath = path.relative(fromDir, toFile).replace(/\\/g, '/');
@@ -49,11 +78,8 @@ const resolveLuminaImportSpecifier = (fromFile: string, spec: string): string | 
   }
   if (spec.startsWith('@std/')) {
     const moduleName = spec.slice('@std/'.length);
-    if (!sourceBackedStdModules.has(moduleName)) {
-      return null;
-    }
-    const stdlibPath = path.join(path.resolve(__dirname, '..'), 'std', `${moduleName}.lm`);
-    if (fs.existsSync(stdlibPath)) {
+    const stdlibPath = resolveStdModulePath(path.resolve(__dirname, '..'), moduleName);
+    if (stdlibPath) {
       return normalizeSpecifier(path.dirname(fromFile), stdlibPath);
     }
   }
@@ -86,11 +112,7 @@ export function luminaPlugin(): Plugin {
   const resolveLmImport = (source: string, importer?: string): string | null => {
     if (source.startsWith('@std/')) {
       const moduleName = source.slice('@std/'.length);
-      if (!sourceBackedStdModules.has(moduleName)) {
-        return null;
-      }
-      const stdlibPath = path.join(repoRoot, 'std', `${moduleName}.lm`);
-      return fs.existsSync(stdlibPath) ? stdlibPath : null;
+      return resolveStdModulePath(repoRoot, moduleName);
     }
     if ((source.startsWith('./') || source.startsWith('../')) && source.endsWith('.lm') && importer) {
       return path.resolve(path.dirname(importer), source);

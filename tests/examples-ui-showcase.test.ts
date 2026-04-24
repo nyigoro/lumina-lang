@@ -1,14 +1,14 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import { compileLuminaTask, setBuildConfig } from '../src/bin/lumina-core.js';
 
-const examplePath = path.resolve(__dirname, '../examples/tabs/main.lm');
+const examplePath = path.resolve(__dirname, '../examples/ui-showcase/main.lm');
 const exampleSource = fs.readFileSync(examplePath, 'utf-8');
 const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
 const stdPath = path.resolve(__dirname, '../std');
 
-describe('tabs example', () => {
+describe('ui showcase example', () => {
   beforeAll(() => {
     setBuildConfig({
       fileExtensions: ['.lm', '.lumina'],
@@ -17,16 +17,15 @@ describe('tabs example', () => {
     });
   });
 
-  test('documents the current tabs authoring surface', () => {
-    expect(exampleSource).toContain('@std/tabs');
-    expect(exampleSource).toContain('root(active');
-    expect(exampleSource).toContain('trigger("overview"');
-    expect(exampleSource).toContain('panel("settings"');
+  test('documents the styled ui authoring surface', () => {
+    expect(exampleSource).toContain('@std/ui');
+    expect(exampleSource).toContain('tabsListStyled');
+    expect(exampleSource).toContain('presenceCard');
     expect(exampleSource).toContain('mount_reactive(renderer, container');
   });
 
-  test('bundled compile avoids runtime binding collisions', async () => {
-    const outPath = path.join(os.tmpdir(), `lumina-tabs-${Date.now()}.generated.js`);
+  test('bundled compile handles source-backed ui wrappers', async () => {
+    const outPath = path.join(os.tmpdir(), `lumina-ui-showcase-${Date.now()}.generated.js`);
 
     try {
       const result = await compileLuminaTask({
@@ -40,10 +39,10 @@ describe('tabs example', () => {
 
       expect(result.ok).toBe(true);
       const generated = fs.readFileSync(outPath, 'utf-8');
-      expect(generated).toContain('function __lumina_bundle_0_list');
-      expect(generated).not.toContain('function list(');
+      expect(generated).toContain('__lumina_bundle_0_button');
+      expect(generated).toContain('__lumina_bundle_0_presenceCard');
     } finally {
       fs.rmSync(outPath, { force: true });
     }
-  }, 15000);
+  });
 });

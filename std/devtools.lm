@@ -1,0 +1,9 @@
+import { render } from "@std";
+
+pub fn snapshot() -> any {
+  render.devtoolsSnapshot()
+}
+
+pub fn install() -> any {
+  render.installDevtools()
+}

@@ -20,6 +20,14 @@ pub fn component_keyed<P>(renderFn: fn(P) -> VNode, props: P, key: any) -> VNode
   render.component_keyed(renderFn, props, key)
 }
 
+pub fn renderApp<P>(renderFn: fn(P) -> VNode, props: P) -> VNode {
+  render.renderApp(renderFn, props)
+}
+
+pub fn renderToStringApp<P>(renderFn: fn(P) -> VNode, props: P) -> string {
+  render.renderToStringApp(renderFn, props)
+}
+
 pub fn createContext<T>(defaultValue: T) -> any {
   render.create_context(defaultValue)
 }
@@ -42,6 +50,10 @@ pub fn state<T>(initial: T) -> Signal<T> {
 
 pub fn remember<T>(compute: fn() -> T) -> T {
   render.remember(compute)
+}
+
+pub fn transitionPresence(open: Signal<bool>, props: any, durationMs: int, renderChildren: fn() -> any) -> VNode {
+  render.transitionPresence(open, props, durationMs, renderChildren)
 }
 
 pub fn createResource<T>(key: any, loader: fn() -> Promise<T>, options: any) -> any {
@@ -422,6 +434,46 @@ pub fn mount_reactive(renderer: Renderer, container: any, view: fn() -> VNode) -
 
 pub fn hydrate_reactive(renderer: Renderer, container: any, view: fn() -> VNode) -> ReactiveRenderRoot {
   render.hydrate_reactive(renderer, container, view)
+}
+
+pub fn mountApp<P>(renderer: Renderer, container: any, renderFn: fn(P) -> VNode, props: P) -> ReactiveRenderRoot {
+  render.mountApp(renderer, container, renderFn, props)
+}
+
+pub fn hydrateApp<P>(renderer: Renderer, container: any, renderFn: fn(P) -> VNode, props: P) -> ReactiveRenderRoot {
+  render.hydrateApp(renderer, container, renderFn, props)
+}
+
+pub fn mountCustomElement<P>(host: any, renderFn: fn(P) -> VNode, options: any) -> any {
+  render.mountCustomElement(host, renderFn, options)
+}
+
+pub fn defineCustomElement<P>(tagName: string, renderFn: fn(P) -> VNode, options: any) -> any {
+  render.defineCustomElement(tagName, renderFn, options)
+}
+
+pub fn devtoolsSnapshot() -> any {
+  render.devtoolsSnapshot()
+}
+
+pub fn installDevtools() -> any {
+  render.installDevtools()
+}
+
+pub fn ssgPage(body: any, options: any) -> string {
+  render.ssgPage(body, options)
+}
+
+pub fn ssgRenderApp<P>(renderFn: fn(P) -> VNode, props: P, options: any) -> string {
+  render.ssgRenderApp(renderFn, props, options)
+}
+
+pub fn ssgWritePage(filePath: string, body: any, options: any) -> string {
+  render.ssgWritePage(filePath, body, options)
+}
+
+pub fn ssgWriteApp<P>(filePath: string, renderFn: fn(P) -> VNode, props: P, options: any) -> string {
+  render.ssgWriteApp(filePath, renderFn, props, options)
 }
 
 pub fn render_to_string(node: VNode) -> string {

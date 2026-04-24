@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import fg from 'fast-glob';
 import { Worker } from 'node:worker_threads';
 
@@ -1622,6 +1624,100 @@ async function bundleProgram(
   return { program: { type: 'Program', body: mergedBody }, sources };
 }
 
+async function runSsgCommand(options: {
+  sourcePath: string;
+  outPath: string;
+  exportName: string;
+  propsJson?: string;
+  title?: string;
+  lang?: string;
+  hydrateModule?: string;
+  grammarPath: string;
+  useRecovery: boolean;
+}): Promise<boolean> {
+  const grammar = await fs.readFile(options.grammarPath, 'utf-8');
+  const parser = compileGrammar(grammar);
+  const bundled = await bundleProgram(
+    options.sourcePath,
+    parser,
+    options.useRecovery,
+    configFileExtensions,
+    configStdPath,
+    findLockfileRoot(options.sourcePath)
+  );
+
+  if (!bundled) return false;
+
+  const sourceContent = bundled.sources.get(options.sourcePath) ?? '';
+  const generated = generateJSFromAst(bundled.program as never, {
+    target: 'esm',
+    includeRuntime: true,
+    sourceMap: false,
+    sourceFile: options.sourcePath,
+    sourceContent,
+  }).code;
+  const entryExportPattern = new RegExp(`export\\s+(?:function|const|let|var|\\{[^}]*\\b${options.exportName}\\b)`);
+  const bundledSource = entryExportPattern.test(generated)
+    ? generated
+    : `${generated.trimEnd()}\nexport { ${options.exportName} };\n`;
+
+  const tempDir = await fs.mkdtemp(path.join(process.cwd(), '.lumina-ssg-'));
+  const tempEntry = path.join(tempDir, 'entry.mjs');
+
+  try {
+    await fs.writeFile(tempEntry, bundledSource, 'utf-8');
+    await ensureRuntimeForOutput(tempEntry, 'esm');
+
+    let props: unknown = undefined;
+    if (typeof options.propsJson === 'string' && options.propsJson.trim().length > 0) {
+      try {
+        props = JSON.parse(options.propsJson);
+      } catch (error) {
+        console.error(`Invalid --props JSON: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    }
+
+    const runnerSource = `
+      import * as entry from ${JSON.stringify(pathToFileURL(tempEntry).href)};
+      import * as runtime from ${JSON.stringify(pathToFileURL(path.join(tempDir, 'lumina-runtime.js')).href)};
+      const exported = entry[${JSON.stringify(options.exportName)}];
+      if (typeof exported !== 'function') {
+        throw new Error(${JSON.stringify(`SSG export '${options.exportName}' was not found in ${options.sourcePath}`)});
+      }
+      const props = ${JSON.stringify(props ?? null)};
+      const result = await exported(props === null ? undefined : props);
+      const html = typeof result === 'string' && result.trimStart().toLowerCase().startsWith('<!doctype')
+        ? result
+        : runtime.ssgPage(result, {
+            title: ${JSON.stringify(options.title ?? '')},
+            lang: ${JSON.stringify(options.lang ?? 'en')},
+            hydrateModule: ${JSON.stringify(options.hydrateModule ?? '')},
+          });
+      process.stdout.write(html);
+    `;
+
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', runnerSource], {
+      encoding: 'utf-8',
+      cwd: path.dirname(options.sourcePath),
+    });
+
+    if (child.status !== 0) {
+      const stderr = String(child.stderr ?? '').trim();
+      console.error(stderr.length > 0 ? stderr : `SSG execution failed for ${options.sourcePath}`);
+      return false;
+    }
+
+    const html = String(child.stdout ?? '');
+    await fs.mkdir(path.dirname(options.outPath), { recursive: true });
+    await fs.writeFile(options.outPath, html, 'utf-8');
+    console.log(`Lumina SSG: ${options.outPath}`);
+    return true;
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 function monomorphizeAst(
   program: unknown,
   options: { noInline?: boolean; noComptime?: boolean } = {}
@@ -2913,10 +3009,11 @@ function printHelp() {
   console.log(`
 lumina <command> [file] [options]
 
-Commands:
-  compile <file>   Compile Lumina source to JS
-  check <file>     Parse + analyze only (no emit)
-  explain <code>   Show explanation for a diagnostic code
+  Commands:
+    compile <file>   Compile Lumina source to JS
+    check <file>     Parse + analyze only (no emit)
+    ssg <file>       Render a static HTML page from a Lumina entry
+    explain <code>   Show explanation for a diagnostic code
   fmt [paths...]   Normalize Lumina source whitespace
   lint [paths...]  Run semantic diagnostics + style lints
   doc [paths...]   Generate Markdown API docs
@@ -3463,6 +3560,29 @@ export async function runLumina(argv: string[] = process.argv.slice(2)) {
       outArg,
       docPublicOnly
     );
+    if (!ok) process.exit(1);
+    return;
+  }
+
+  if (command === 'ssg') {
+    const sourcePath = file ? path.resolve(file) : positionalArgs[0] ? path.resolve(positionalArgs[0]) : '';
+    if (!sourcePath) {
+      console.error('Usage: lumina ssg <file> --out <file> [--export main] [--props <json>]');
+      process.exit(1);
+    }
+    const defaultSsgOut = outDir ? path.join(outDir, 'index.html') : path.join(process.cwd(), 'index.html');
+    const outPath = path.resolve(String(args.get('--out') ?? defaultSsgOut));
+    const ok = await runSsgCommand({
+      sourcePath,
+      outPath,
+      exportName: String(args.get('--export') ?? 'main'),
+      propsJson: typeof args.get('--props') === 'string' ? String(args.get('--props')) : undefined,
+      title: typeof args.get('--title') === 'string' ? String(args.get('--title')) : undefined,
+      lang: typeof args.get('--lang') === 'string' ? String(args.get('--lang')) : undefined,
+      hydrateModule: typeof args.get('--hydrate') === 'string' ? String(args.get('--hydrate')) : undefined,
+      grammarPath,
+      useRecovery,
+    });
     if (!ok) process.exit(1);
     return;
   }

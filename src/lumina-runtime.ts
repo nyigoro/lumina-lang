@@ -1,9 +1,25 @@
 import {
   createContextToken,
   FrameManager,
+  type ComponentFrame,
   type ComponentFunction,
   type ContextToken,
 } from './frame-manager.js';
+import {
+  createTestingDomHarness,
+  dispatchTestingCheckedChange,
+  dispatchTestingClick,
+  dispatchTestingInput,
+  dispatchTestingKeydown,
+  dispatchTestingSubmit,
+  getTestingHarnessBody,
+  getTestingHarnessByText,
+  getTestingHarnessById,
+  getTestingHarnessContainer,
+  getTestingTextContent,
+  queryTestingHarnessByRole,
+  type TestingDomHarness,
+} from './testing-dom.js';
 
 export type LuminaEnumLike =
   | { $tag: string; $payload?: unknown }
@@ -5766,6 +5782,30 @@ const scheduleEffectsFlush = (): void => {
   });
 };
 
+const registerDevtoolsSignal = (signal: Signal<unknown> | Memo<unknown>): void => {
+  devtoolsSignals.add(signal);
+};
+
+const unregisterDevtoolsSignal = (signal: Signal<unknown> | Memo<unknown>): void => {
+  devtoolsSignals.delete(signal);
+};
+
+const scheduleDevtoolsNotify = (): void => {
+  if (devtoolsListeners.size === 0 || devtoolsNotifyPending) return;
+  devtoolsNotifyPending = true;
+  runMicrotask(() => {
+    devtoolsNotifyPending = false;
+    const snapshot = snapshotDevtools();
+    for (const listener of Array.from(devtoolsListeners)) {
+      try {
+        listener(snapshot);
+      } catch {
+        // Ignore observer failures.
+      }
+    }
+  });
+};
+
 const trackReactiveSource = (source: ReactiveSource): void => {
   if (!activeComputation) return;
   if (activeComputation.isDisposed()) return;
@@ -5859,10 +5899,12 @@ const notifyReactiveObservers = (source: ReactiveSource): void => {
 
 export class Signal<T> implements ReactiveSource {
   observers = new Set<ReactiveComputation>();
+  readonly __luminaDevtoolsId = nextDevtoolsSignalId++;
   private value: T;
 
   constructor(initial: T) {
     this.value = __lumina_clone(initial);
+    registerDevtoolsSignal(this as Signal<unknown>);
   }
 
   get(): T {
@@ -5879,6 +5921,7 @@ export class Signal<T> implements ReactiveSource {
     if (runtimeEquals(this.value, cloned)) return false;
     this.value = cloned;
     notifyReactiveObservers(this);
+    scheduleDevtoolsNotify();
     return true;
   }
 
@@ -5891,6 +5934,7 @@ export class Signal<T> implements ReactiveSource {
 
 export class Memo<T> implements ReactiveSource {
   observers = new Set<ReactiveComputation>();
+  readonly __luminaDevtoolsId = nextDevtoolsSignalId++;
   private readonly compute: () => T;
   private readonly computation: ReactiveComputation;
   private value!: T;
@@ -5899,6 +5943,7 @@ export class Memo<T> implements ReactiveSource {
 
   constructor(compute: () => T) {
     this.compute = compute;
+    registerDevtoolsSignal(this as Memo<unknown>);
     this.computation = new ReactiveComputation(
       () => {
         const next = __lumina_clone(this.compute());
@@ -5906,6 +5951,7 @@ export class Memo<T> implements ReactiveSource {
         this.value = next;
         this.ready = true;
         this.stale = false;
+        scheduleDevtoolsNotify();
         if (changed) {
           notifyReactiveObservers(this);
         }
@@ -5914,6 +5960,7 @@ export class Memo<T> implements ReactiveSource {
       () => {
         this.stale = true;
         notifyReactiveObservers(this);
+        scheduleDevtoolsNotify();
       }
     );
   }
@@ -5938,6 +5985,8 @@ export class Memo<T> implements ReactiveSource {
   dispose(): void {
     this.computation.dispose();
     this.observers.clear();
+    unregisterDevtoolsSignal(this as Memo<unknown>);
+    scheduleDevtoolsNotify();
   }
 }
 
@@ -6052,6 +6101,7 @@ const startResourceLoad = <T>(record: ResourceRecord<T>, force: boolean = false)
       record.status.set('success');
       record.expiresAt = record.ttlMs > 0 ? Date.now() + record.ttlMs : Number.POSITIVE_INFINITY;
       record.promise = null;
+      scheduleDevtoolsNotify();
       return value;
     },
     (error) => {
@@ -6059,12 +6109,14 @@ const startResourceLoad = <T>(record: ResourceRecord<T>, force: boolean = false)
       record.status.set('error');
       record.expiresAt = 0;
       record.promise = null;
+      scheduleDevtoolsNotify();
       throw error;
     }
   );
 
   promise.catch(() => undefined);
   record.promise = promise;
+  scheduleDevtoolsNotify();
   return promise;
 };
 
@@ -6126,7 +6178,79 @@ export interface VNode {
 type VNodeInput = VNode | string | number | boolean | null | undefined | VNodeInput[];
 type ComponentRenderable = VNodeInput;
 
+type CustomElementProps = Record<string, unknown>;
+
+interface CustomElementMountOptions<P = CustomElementProps> {
+  observedAttributes?: string[];
+  useShadow?: boolean;
+  props?: Partial<P>;
+  mapProps?: (attrs: Record<string, string | null>, host: unknown) => P;
+  registry?: {
+    define?: (name: string, ctor: new () => unknown) => void;
+    get?: (name: string) => unknown;
+  };
+  baseClass?: new () => unknown;
+}
+
+interface CustomElementController<P = CustomElementProps> {
+  root: ReactiveRenderRoot | { $tag: string; $payload?: unknown };
+  props: Signal<P>;
+  host: unknown;
+  target: unknown;
+  updateProps: (next: P) => P;
+  syncAttributes: () => P;
+  disconnect: () => void;
+}
+
+interface SsgPageOptions {
+  title?: string;
+  lang?: string;
+  head?: string | string[];
+  bodyClassName?: string;
+  appClassName?: string;
+  appId?: string;
+  hydrateModule?: string;
+}
+
+interface DevtoolsSignalSnapshot {
+  id: number;
+  kind: 'signal' | 'memo';
+  value: unknown;
+}
+
+interface DevtoolsResourceSnapshot {
+  key: string;
+  status: string;
+  hasData: boolean;
+  error: unknown;
+}
+
+interface DevtoolsFrameSnapshot {
+  id: number;
+  name: string;
+  key: unknown;
+  slots: Array<{ kind: string }>;
+  children: DevtoolsFrameSnapshot[];
+}
+
+interface DevtoolsSnapshot {
+  roots: Array<{ id: number; current: VNode | null; frames: DevtoolsFrameSnapshot[] }>;
+  resources: DevtoolsResourceSnapshot[];
+  signals: DevtoolsSignalSnapshot[];
+}
+
+type DevtoolsListener = (snapshot: DevtoolsSnapshot) => void;
+
 let activeFrameManager: FrameManager | null = null;
+let nextDevtoolsSignalId = 1;
+let nextDevtoolsRootId = 1;
+const devtoolsSignals = new Set<Signal<unknown> | Memo<unknown>>();
+const devtoolsRoots = new Map<number, ReactiveRenderRoot>();
+const devtoolsListeners = new Set<DevtoolsListener>();
+let devtoolsNotifyPending = false;
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' ? value as Record<string, unknown> : {};
 
 const normalizeVNodeChildren = (input: VNodeInput): VNode[] => {
   if (Array.isArray(input)) {
@@ -6834,6 +6958,53 @@ const patchDomNode = (
   return element;
 };
 
+const hydrateDomNode = (
+  domNode: DomNodeLike,
+  node: VNode,
+  documentLike: DomDocumentLike,
+  eventStore: DomEventStore,
+  portalStore: DomPortalStore
+): DomNodeLike => {
+  if (node.kind === 'text') {
+    const nextText = node.text ?? '';
+    if (domNode.textContent !== nextText) {
+      domNode.textContent = nextText;
+    }
+    return domNode;
+  }
+
+  if (node.kind === 'portal') {
+    patchPortalMount(domNode as DomElementLike, vnodePortal(node.target, []), node, documentLike, eventStore, portalStore);
+    return domNode;
+  }
+
+  const element = domNode as DomElementLike;
+  if (node.kind === 'element') {
+    updateDomProperties(element, undefined, node.props, eventStore);
+  }
+
+  const existingChildren = readChildNodes(element);
+  const nextChildren = asDomChildren(node);
+  const nextDomChildren: DomNodeLike[] = [];
+
+  for (let index = 0; index < nextChildren.length; index += 1) {
+    const nextChild = nextChildren[index];
+    const currentChild = existingChildren[index];
+    nextDomChildren.push(
+      currentChild
+        ? hydrateDomNode(currentChild, nextChild, documentLike, eventStore, portalStore)
+        : createDomNode(nextChild, documentLike, eventStore, portalStore)
+    );
+  }
+
+  for (let index = nextChildren.length; index < existingChildren.length; index += 1) {
+    disposeDomNode(existingChildren[index], eventStore, portalStore);
+  }
+
+  setChildren(element, nextDomChildren);
+  return element;
+};
+
 export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
   const documentLike = getDomDocument(options);
   const eventStore: DomEventStore = new Map();
@@ -6875,7 +7046,11 @@ export const createDomRenderer = (options?: DomRendererOptions): Renderer => {
         currentVNode = node;
         return;
       }
-      currentDom = existing;
+      const hydratedDom = hydrateDomNode(existing, node, documentLike, eventStore, portalStore);
+      if (hydratedDom !== existing) {
+        setChildren(domContainer, [hydratedDom]);
+      }
+      currentDom = hydratedDom;
       currentVNode = node;
     },
     unmount(container: unknown): void {
@@ -6896,7 +7071,7 @@ const htmlEscapeMap: Record<string, string> = {
   "'": '&#39;',
 };
 
-const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (char) => htmlEscapeMap[char] ?? char);
+const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, (char) => htmlEscapeMap[char] ?? char);
 
 const kebabCase = (value: string): string =>
   value.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`).replace(/^ms-/, '-ms-');
@@ -7009,6 +7184,171 @@ export const createSsrRenderer = (): Renderer => {
 };
 
 export const renderToString = (node: VNode): string => vnodeToHtml(node);
+
+const renderAppVNode = <P>(
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): VNode => {
+  const frameManager = new FrameManager();
+  return runWithFrameManager(frameManager, () => render.component(componentFn, props));
+};
+
+const mountReactiveApp = <P>(
+  renderer: unknown,
+  container: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.mount_reactive(renderer, container, () => render.component(componentFn, props));
+
+const hydrateReactiveApp = <P>(
+  renderer: unknown,
+  container: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.hydrate_reactive(renderer, container, () => render.component(componentFn, props));
+
+const mountTestingApp = <P>(
+  harness: TestingDomHarness,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P,
+  hydrate: boolean = false
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => {
+  const renderer = harness.renderer ?? createDomRenderer({ document: harness.document as unknown as DomDocumentLike });
+  harness.renderer = renderer;
+  const root = hydrate
+    ? hydrateReactiveApp(renderer, harness.container, componentFn, props)
+    : mountReactiveApp(renderer, harness.container, componentFn, props);
+  harness.root = root;
+  return root;
+};
+
+const readCustomElementAttributes = (
+  host: unknown,
+  observedAttributes: readonly string[]
+): Record<string, string | null> => {
+  const attrs: Record<string, string | null> = {};
+  const element = host as { getAttribute?: (name: string) => string | null };
+  for (const name of observedAttributes) {
+    attrs[name] = typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
+  }
+  return attrs;
+};
+
+const buildCustomElementProps = <P>(
+  host: unknown,
+  options?: CustomElementMountOptions<P>
+): P => {
+  const attrs = readCustomElementAttributes(host, options?.observedAttributes ?? []);
+  if (typeof options?.mapProps === 'function') {
+    return options.mapProps(attrs, host);
+  }
+  return {
+    ...((options?.props ?? {}) as Record<string, unknown>),
+    ...attrs,
+  } as P;
+};
+
+const ensureCustomElementTarget = <P>(host: unknown, options?: CustomElementMountOptions<P>): unknown => {
+  const element = host as {
+    shadowRoot?: unknown;
+    attachShadow?: (options: { mode: string }) => unknown;
+  };
+  if (!options?.useShadow) return host;
+  if (element.shadowRoot) return element.shadowRoot;
+  if (typeof element.attachShadow === 'function') {
+    return element.attachShadow({ mode: 'open' });
+  }
+  return host;
+};
+
+const mountCustomElementHost = <P>(
+  host: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  options?: CustomElementMountOptions<P>
+): CustomElementController<P> => {
+  const documentLike =
+    ((host as { ownerDocument?: DomDocumentLike }).ownerDocument ??
+      (globalThis as unknown as { document?: DomDocumentLike }).document);
+  if (!documentLike) {
+    throw new Error('mountCustomElement requires a document-like host');
+  }
+
+  const renderer = createDomRenderer({ document: documentLike });
+  const target = ensureCustomElementTarget(host, options);
+  const props = new Signal<P>(buildCustomElementProps(host, options));
+  const root = render.mount_reactive(renderer, target, () => render.component(componentFn, render.get(props)));
+
+  return {
+    root,
+    props,
+    host,
+    target,
+    updateProps: (next: P): P => {
+      render.set(props, next);
+      return next;
+    },
+    syncAttributes: (): P => {
+      const next = buildCustomElementProps(host, options);
+      render.set(props, next);
+      return next;
+    },
+    disconnect: (): void => {
+      if (isUnmountableLike(root)) {
+        render.dispose_reactive(root);
+      }
+    },
+  };
+};
+
+const defineCustomElementClass = <P>(
+  tagName: string,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  options?: CustomElementMountOptions<P>
+): (new () => unknown) => {
+  const BaseCtor =
+    (options?.baseClass as (new () => unknown) | undefined) ??
+    ((globalThis as { HTMLElement?: new () => unknown }).HTMLElement ?? class {});
+  const registry =
+    options?.registry ??
+    ((globalThis as { customElements?: { define?: (name: string, ctor: new () => unknown) => void; get?: (name: string) => unknown } })
+      .customElements);
+
+  const CustomElement = class LuminaCustomElement extends (BaseCtor as new () => Record<string, unknown>) {
+    private __luminaController?: CustomElementController<P>;
+
+    static get observedAttributes(): string[] {
+      return [...(options?.observedAttributes ?? [])];
+    }
+
+    connectedCallback(): void {
+      if (!this.__luminaController) {
+        this.__luminaController = mountCustomElementHost(this, componentFn, options);
+      } else {
+        this.__luminaController.syncAttributes();
+      }
+    }
+
+    attributeChangedCallback(): void {
+      this.__luminaController?.syncAttributes();
+    }
+
+    disconnectedCallback(): void {
+      this.__luminaController?.disconnect();
+      this.__luminaController = undefined;
+    }
+  };
+
+  if (registry?.define) {
+    const existing = typeof registry.get === 'function' ? registry.get(tagName) : undefined;
+    if (!existing) {
+      registry.define(tagName, CustomElement);
+    }
+  }
+
+  return CustomElement;
+};
 
 interface Canvas2DLike {
   canvas?: { width?: number; height?: number };
@@ -7255,14 +7595,89 @@ export class ReactiveRenderRoot {
     readonly root: RenderRoot,
     readonly effect: Effect,
     readonly frameManager: FrameManager
-  ) {}
+  ) {
+    registerDevtoolsRoot(this);
+  }
 
   dispose(): void {
+    unregisterDevtoolsRoot(this);
     this.effect.dispose();
     this.frameManager.disposeFrame(this.frameManager.rootFrame, false);
     this.root.unmount();
   }
 }
+
+const devtoolsRootIds = new WeakMap<ReactiveRenderRoot, number>();
+
+const registerDevtoolsRoot = (root: ReactiveRenderRoot): void => {
+  if (!devtoolsRootIds.has(root)) {
+    devtoolsRootIds.set(root, nextDevtoolsRootId++);
+  }
+  devtoolsRoots.set(devtoolsRootIds.get(root)!, root);
+  scheduleDevtoolsNotify();
+};
+
+const unregisterDevtoolsRoot = (root: ReactiveRenderRoot): void => {
+  const id = devtoolsRootIds.get(root);
+  if (id !== undefined) {
+    devtoolsRoots.delete(id);
+    scheduleDevtoolsNotify();
+  }
+};
+
+const snapshotFrame = (frame: ComponentFrame): DevtoolsFrameSnapshot => ({
+  id: frame.id,
+  name: frame.componentFn?.name?.trim() || (frame.componentFn ? '<anonymous component>' : 'root'),
+  key: frame.key ?? null,
+  slots: frame.slots.map((slot) => ({ kind: slot.kind })),
+  children: [
+    ...Array.from(frame.keyedChildren.values()).map(snapshotFrame),
+    ...frame.unkeyedChildren.map(snapshotFrame),
+  ],
+});
+
+function snapshotDevtools(): DevtoolsSnapshot {
+  return {
+    roots: Array.from(devtoolsRoots.values()).map((root) => ({
+      id: devtoolsRootIds.get(root) ?? 0,
+      current: root.root.currentNode(),
+      frames: [
+        ...Array.from(root.frameManager.rootFrame.keyedChildren.values()).map(snapshotFrame),
+        ...root.frameManager.rootFrame.unkeyedChildren.map(snapshotFrame),
+      ],
+    })),
+    resources: Array.from(resourceCache.values()).map((record) => ({
+      key: record.key,
+      status: record.status.peek(),
+      hasData: record.hasData.peek(),
+      error: record.error.peek(),
+    })),
+    signals: Array.from(devtoolsSignals).map((signal) => ({
+      id: signal.__luminaDevtoolsId,
+      kind: signal instanceof Memo ? 'memo' : 'signal',
+      value: signal.peek(),
+    })),
+  };
+}
+
+const subscribeDevtools = (listener: DevtoolsListener): (() => void) => {
+  devtoolsListeners.add(listener);
+  listener(snapshotDevtools());
+  return () => {
+    devtoolsListeners.delete(listener);
+  };
+};
+
+const installLuminaDevtools = (key: string = '__LUMINA_DEVTOOLS__'): Record<string, unknown> => {
+  const globalRecord = globalThis as Record<string, unknown>;
+  const handle = {
+    version: 'beta',
+    snapshot: () => snapshotDevtools(),
+    subscribe: (listener: DevtoolsListener) => subscribeDevtools(listener),
+  };
+  globalRecord[key] = handle;
+  return handle;
+};
 
 const toRenderErrorMessage = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
@@ -7311,6 +7726,134 @@ const runWithFrameManager = <T>(frameManager: FrameManager, renderView: () => T)
   } finally {
     activeFrameManager = previousManager;
   }
+};
+
+const clearTimerHandle = (handle: ReturnType<typeof setTimeout> | null | undefined): void => {
+  if (handle !== null && handle !== undefined) {
+    clearTimeout(handle);
+  }
+};
+
+const renderTransitionPresence = (
+  open: Signal<boolean>,
+  props: Record<string, unknown> | null | undefined,
+  durationMs: number,
+  children: () => ComponentRenderable
+): VNode => {
+  const mounted = render.state(open.peek());
+  const phase = render.state(open.peek() ? 'entered' : 'hidden');
+  const refs = render.remember(() => ({
+    lastOpen: open.peek(),
+    settleTimer: null as ReturnType<typeof setTimeout> | null,
+    unmountTimer: null as ReturnType<typeof setTimeout> | null,
+  }));
+
+  const openNow = open.get();
+  let mountedNow = mounted.get();
+  let phaseNow = phase.get();
+  if (openNow !== refs.lastOpen) {
+    refs.lastOpen = openNow;
+    clearTimerHandle(refs.settleTimer);
+    clearTimerHandle(refs.unmountTimer);
+    refs.settleTimer = null;
+    refs.unmountTimer = null;
+
+    if (openNow) {
+      if (!mountedNow) {
+        mounted.set(true);
+        mountedNow = true;
+      }
+      phase.set('enter-from');
+      phaseNow = 'enter-from';
+      runMicrotask(() => {
+        if (open.peek()) phase.set('enter-to');
+      });
+      refs.settleTimer = setTimeout(() => {
+        if (open.peek()) phase.set('entered');
+        refs.settleTimer = null;
+      }, durationMs);
+    } else if (mountedNow) {
+      phase.set('exit-from');
+      phaseNow = 'exit-from';
+      runMicrotask(() => {
+        if (!open.peek()) phase.set('exit-to');
+      });
+      refs.unmountTimer = setTimeout(() => {
+        if (!open.peek()) {
+          mounted.set(false);
+          phase.set('hidden');
+        }
+        refs.unmountTimer = null;
+      }, durationMs);
+    }
+  }
+
+  if (!openNow && !mountedNow) {
+    return vnodeFragment([]);
+  }
+
+  const currentPhase = openNow && phaseNow === 'hidden' ? 'entered' : phaseNow;
+  const currentProps = mergeProps(props, {
+    'data-transition-state': currentPhase,
+    'data-transition-open': openNow ? 'true' : 'false',
+    'data-transition-duration': String(durationMs),
+  });
+
+  return vnodeElement('div', currentProps, resolveChildrenInput(children));
+};
+
+const coerceSsgPageOptions = (options: unknown): Required<SsgPageOptions> => {
+  const candidate = asRecord(options);
+  const headValue = candidate.head;
+  const head = Array.isArray(headValue)
+    ? headValue.map((entry) => String(entry))
+    : headValue == null
+      ? []
+      : [String(headValue)];
+  return {
+    title: typeof candidate.title === 'string' ? candidate.title : '',
+    lang: typeof candidate.lang === 'string' && candidate.lang.length > 0 ? candidate.lang : 'en',
+    head,
+    bodyClassName: typeof candidate.bodyClassName === 'string' ? candidate.bodyClassName : '',
+    appClassName: typeof candidate.appClassName === 'string' ? candidate.appClassName : '',
+    appId: typeof candidate.appId === 'string' && candidate.appId.length > 0 ? candidate.appId : 'app',
+    hydrateModule: typeof candidate.hydrateModule === 'string' ? candidate.hydrateModule : '',
+  };
+};
+
+const renderSsgPage = (body: unknown, options?: unknown): string => {
+  const normalized = coerceSsgPageOptions(options);
+  const bodyContent = isVNode(body)
+    ? renderToString(body)
+    : Array.isArray(body) || (body && typeof body === 'object')
+      ? renderToString(coerceRenderableToVNode(body as VNodeInput))
+      : String(body ?? '');
+  const head = [
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    normalized.title ? `<title>${escapeHtml(normalized.title)}</title>` : '',
+    ...normalized.head,
+  ].filter((entry) => entry.length > 0).join('');
+  const hydrateScript = normalized.hydrateModule
+    ? `<script type="module" src="${escapeHtml(normalized.hydrateModule)}"></script>`
+    : '';
+  const bodyClass = normalized.bodyClassName ? ` class="${escapeHtml(normalized.bodyClassName)}"` : '';
+  const appClass = normalized.appClassName ? ` class="${escapeHtml(normalized.appClassName)}"` : '';
+  return `<!DOCTYPE html><html lang="${escapeHtml(normalized.lang)}"><head>${head}</head><body${bodyClass}><div id="${escapeHtml(normalized.appId)}"${appClass}>${bodyContent}</div>${hydrateScript}</body></html>`;
+};
+
+const writeSsgPage = (filePath: string, body: unknown, options?: unknown): string => {
+  const resolvedPath = resolvePathBasic(filePath);
+  const fsModule = getNodeBuiltinModule('node:fs') as {
+    mkdirSync?: (path: string, options?: { recursive?: boolean }) => void;
+    writeFileSync?: (path: string, content: string, encoding?: string) => void;
+  } | null;
+  if (!fsModule?.mkdirSync || !fsModule.writeFileSync) {
+    throw new Error('SSG write requires Node.js file system support');
+  }
+  fsModule.mkdirSync(dirnamePathBasic(resolvedPath), { recursive: true });
+  fsModule.writeFileSync(resolvedPath, renderSsgPage(body, options), 'utf-8');
+  return resolvedPath;
 };
 
 const requireActiveFrameManager = (apiName: string): FrameManager => {
@@ -8366,6 +8909,10 @@ export const render = {
     props: P,
     key: unknown
   ): VNode => render.component(componentFn, props, key),
+  render_app: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P): VNode =>
+    renderAppVNode(componentFn, props),
+  render_to_string_app: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P): string =>
+    renderToString(renderAppVNode(componentFn, props)),
   create_context: <T>(defaultValue?: T): ContextToken<T> => createContextToken(defaultValue),
   create_required_context: <T>(): ContextToken<T> => createContextToken<T>(),
   with_context: <T>(
@@ -8388,6 +8935,12 @@ export const render = {
     const frameManager = requireActiveFrameManager('render.remember');
     return frameManager.getSlot('memo', compute);
   },
+  transition_presence: (
+    open: Signal<boolean>,
+    props: Record<string, unknown> | null | undefined,
+    durationMs: number,
+    renderChildren: () => ComponentRenderable
+  ): VNode => renderTransitionPresence(open, props, durationMs, renderChildren),
   resource_create: <T>(
     key: unknown,
     loader: (() => Promise<T>) | (() => T),
@@ -8434,6 +8987,7 @@ export const render = {
     handle.record.expiresAt = 0;
     handle.record.status.set('idle');
     ensureResourceCurrent(handle.record);
+    scheduleDevtoolsNotify();
   },
   resource_mutate: <T>(resource: unknown, value: T): T => {
     const handle = asResourceHandle<T>(resource, 'render.resource_mutate');
@@ -8442,6 +8996,7 @@ export const render = {
     handle.record.error.set(null);
     handle.record.status.set('success');
     handle.record.expiresAt = handle.record.ttlMs > 0 ? Date.now() + handle.record.ttlMs : Number.POSITIVE_INFINITY;
+    scheduleDevtoolsNotify();
     return handle.record.data.get() as T;
   },
   suspense: (fallback: unknown, renderChildren: () => ComponentRenderable): VNode => {
@@ -8475,6 +9030,16 @@ export const render = {
     loader: (() => Promise<T>) | (() => T),
     options?: unknown
   ): ResourceHandle<T> => render.resource_create(key, loader, options),
+  renderApp: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P): VNode =>
+    render.render_app(componentFn, props),
+  renderToStringApp: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P): string =>
+    render.render_to_string_app(componentFn, props),
+  transitionPresence: (
+    open: Signal<boolean>,
+    props: Record<string, unknown> | null | undefined,
+    durationMs: number,
+    renderChildren: () => ComponentRenderable
+  ): VNode => render.transition_presence(open, props, durationMs, renderChildren),
   resourceStatus: (resource: unknown): string => render.resource_status(resource),
   resourceData: (resource: unknown): unknown => render.resource_data(resource),
   resourceError: (resource: unknown): unknown => render.resource_error(resource),
@@ -8484,6 +9049,82 @@ export const render = {
   resourceMutate: <T>(resource: unknown, value: T): T => render.resource_mutate(resource, value),
   errorBoundary: (fallback: unknown, renderChildren: () => ComponentRenderable): VNode =>
     render.error_boundary(fallback, renderChildren),
+  mountApp: <P>(
+    renderer: unknown,
+    container: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+    render.mount_app(renderer, container, componentFn, props),
+  hydrateApp: <P>(
+    renderer: unknown,
+    container: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+    render.hydrate_app(renderer, container, componentFn, props),
+  testingCreateDomHarness: (): TestingDomHarness => render.testing_create_dom_harness(),
+  testingMountApp: <P>(
+    harness: TestingDomHarness,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => render.testing_mount_app(harness, componentFn, props),
+  testingHydrateApp: <P>(
+    harness: TestingDomHarness,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => render.testing_hydrate_app(harness, componentFn, props),
+  testingContainer: (harness: unknown): unknown => render.testing_container(harness),
+  testingBody: (harness: unknown): unknown => render.testing_body(harness),
+  testingGetById: (harness: unknown, id: string): unknown => render.testing_get_by_id(harness, id),
+  testingGetByText: (scope: unknown, value: string): unknown => render.testing_get_by_text(scope, value),
+  testingGetByRole: (scope: unknown, role: string): unknown => {
+    const matches = render.testing_query_all_by_role(scope, role) as unknown[];
+    return matches[0] ?? null;
+  },
+  testingQueryAllByRole: (scope: unknown, role: string): unknown => render.testing_query_all_by_role(scope, role),
+  testingTextContent: (node: unknown): string => render.testing_text_content(node),
+  testingClick: (node: unknown): void => render.testing_click(node),
+  testingInput: (node: unknown, value: string): void => render.testing_input(node, value),
+  testingChangeChecked: (node: unknown, checked: boolean): void => render.testing_change_checked(node, checked),
+  testingKeydown: (node: unknown, key: string, shiftKey?: boolean): void =>
+    render.testing_keydown(node, key, shiftKey),
+  testingSubmit: (node: unknown): void => render.testing_submit(node),
+  devtoolsSnapshot: (): DevtoolsSnapshot => render.devtools_snapshot(),
+  installDevtools: (key?: string): Record<string, unknown> => render.install_devtools(key),
+  ssgPage: (body: unknown, options?: unknown): string => render.ssg_page(body, options),
+  ssgRenderApp: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P, options?: unknown): string =>
+    render.ssg_render_app(componentFn, props, options),
+  ssgWritePage: (filePath: string, body: unknown, options?: unknown): string =>
+    render.ssg_write_page(filePath, body, options),
+  ssgWriteApp: <P>(
+    filePath: string,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P,
+    options?: unknown
+  ): string => render.ssg_write_app(filePath, componentFn, props, options),
+  devtools_snapshot: (): DevtoolsSnapshot => snapshotDevtools(),
+  install_devtools: (key?: string): Record<string, unknown> => installLuminaDevtools(key),
+  ssg_page: (body: unknown, options?: unknown): string => renderSsgPage(body, options),
+  ssg_render_app: <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P, options?: unknown): string =>
+    renderSsgPage(render.render_app(componentFn, props), options),
+  ssg_write_page: (filePath: string, body: unknown, options?: unknown): string => writeSsgPage(filePath, body, options),
+  ssg_write_app: <P>(
+    filePath: string,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P,
+    options?: unknown
+  ): string => writeSsgPage(filePath, render.render_app(componentFn, props), options),
+  mountCustomElement: <P>(
+    host: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    options?: CustomElementMountOptions<P>
+  ): CustomElementController<P> => render.mount_custom_element(host, componentFn, options),
+  defineCustomElement: <P>(
+    tagName: string,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    options?: CustomElementMountOptions<P>
+  ): new () => unknown => render.define_custom_element(tagName, componentFn, options),
   children: (input: unknown): VNode[] => normalizeVNodeChildren(resolveChildrenInput(input)),
   slot: <P>(
     slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
@@ -10419,6 +11060,57 @@ export const render = {
       return Result.Err(toRenderErrorMessage(error));
     }
   },
+  mount_app: <P>(
+    renderer: unknown,
+    container: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+    mountReactiveApp(renderer, container, componentFn, props),
+  hydrate_app: <P>(
+    renderer: unknown,
+    container: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+    hydrateReactiveApp(renderer, container, componentFn, props),
+  testing_create_dom_harness: (): TestingDomHarness => {
+    const harness = createTestingDomHarness();
+    harness.renderer = createDomRenderer({ document: harness.document as unknown as DomDocumentLike });
+    return harness;
+  },
+  testing_mount_app: <P>(
+    harness: TestingDomHarness,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => mountTestingApp(harness, componentFn, props, false),
+  testing_hydrate_app: <P>(
+    harness: TestingDomHarness,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    props: P
+  ): ReactiveRenderRoot | { $tag: string; $payload?: unknown } => mountTestingApp(harness, componentFn, props, true),
+  testing_container: (harness: unknown): unknown => getTestingHarnessContainer(harness),
+  testing_body: (harness: unknown): unknown => getTestingHarnessBody(harness),
+  testing_get_by_id: (harness: unknown, id: string): unknown => getTestingHarnessById(harness, id),
+  testing_get_by_text: (scope: unknown, value: string): unknown => getTestingHarnessByText(scope, value),
+  testing_query_all_by_role: (scope: unknown, role: string): unknown => queryTestingHarnessByRole(scope, role),
+  testing_text_content: (node: unknown): string => getTestingTextContent(node),
+  testing_click: (node: unknown): void => dispatchTestingClick(node),
+  testing_input: (node: unknown, value: string): void => dispatchTestingInput(node, value),
+  testing_change_checked: (node: unknown, checked: boolean): void => dispatchTestingCheckedChange(node, checked),
+  testing_keydown: (node: unknown, key: string, shiftKey?: boolean): void =>
+    dispatchTestingKeydown(node, key, shiftKey ?? false),
+  testing_submit: (node: unknown): void => dispatchTestingSubmit(node),
+  mount_custom_element: <P>(
+    host: unknown,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    options?: CustomElementMountOptions<P>
+  ): CustomElementController<P> => mountCustomElementHost(host, componentFn, options),
+  define_custom_element: <P>(
+    tagName: string,
+    componentFn: ComponentFunction<P, ComponentRenderable>,
+    options?: CustomElementMountOptions<P>
+  ): new () => unknown => defineCustomElementClass(tagName, componentFn, options),
   update: (root: unknown, node: VNode): void => {
     if (!root || typeof root !== 'object') return;
     if (typeof (root as { update?: unknown }).update !== 'function') return;
@@ -10459,6 +11151,12 @@ export const component_keyed = <P>(
   props: P,
   key: unknown
 ): VNode => render.component_keyed(componentFn, props, key);
+export const renderApp = <P>(componentFn: ComponentFunction<P, ComponentRenderable>, props: P): VNode =>
+  render.render_app(componentFn, props);
+export const renderToStringApp = <P>(
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): string => render.render_to_string_app(componentFn, props);
 export const createContext = <T>(defaultValue?: T): ContextToken<T> => render.create_context(defaultValue);
 export const create_required_context = <T>(): ContextToken<T> => render.create_required_context<T>();
 export const withContext = <T>(context: ContextToken<T>, value: T, renderChildren: () => ComponentRenderable): VNode =>
@@ -10482,6 +11180,54 @@ export const suspense = (fallback: unknown, renderChildren: () => ComponentRende
   render.suspense(fallback, renderChildren);
 export const errorBoundary = (fallback: unknown, renderChildren: () => ComponentRenderable): VNode =>
   render.error_boundary(fallback, renderChildren);
+export const mountApp = <P>(
+  renderer: unknown,
+  container: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.mount_app(renderer, container, componentFn, props);
+export const hydrateApp = <P>(
+  renderer: unknown,
+  container: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.hydrate_app(renderer, container, componentFn, props);
+export const testingCreateDomHarness = (): TestingDomHarness => render.testing_create_dom_harness();
+export const testingMountApp = <P>(
+  harness: TestingDomHarness,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.testing_mount_app(harness, componentFn, props);
+export const testingHydrateApp = <P>(
+  harness: TestingDomHarness,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P
+): ReactiveRenderRoot | { $tag: string; $payload?: unknown } =>
+  render.testing_hydrate_app(harness, componentFn, props);
+export const testingContainer = (harness: unknown): unknown => render.testing_container(harness);
+export const testingBody = (harness: unknown): unknown => render.testing_body(harness);
+export const testingGetById = (harness: unknown, id: string): unknown => render.testing_get_by_id(harness, id);
+export const testingTextContent = (node: unknown): string => render.testing_text_content(node);
+export const testingClick = (node: unknown): void => render.testing_click(node);
+export const testingInput = (node: unknown, value: string): void => render.testing_input(node, value);
+export const testingChangeChecked = (node: unknown, checked: boolean): void =>
+  render.testing_change_checked(node, checked);
+export const testingKeydown = (node: unknown, key: string, shiftKey?: boolean): void =>
+  render.testing_keydown(node, key, shiftKey);
+export const testingSubmit = (node: unknown): void => render.testing_submit(node);
+export const mountCustomElement = <P>(
+  host: unknown,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  options?: CustomElementMountOptions<P>
+): CustomElementController<P> => render.mount_custom_element(host, componentFn, options);
+export const defineCustomElement = <P>(
+  tagName: string,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  options?: CustomElementMountOptions<P>
+): new () => unknown => render.define_custom_element(tagName, componentFn, options);
 export const children = (input: unknown): VNode[] => render.children(input);
 export const slot = <P>(
   slotValue: ((props: P) => ComponentRenderable) | VNodeInput | null | undefined,
@@ -10726,6 +11472,32 @@ export const props_on_submit = (handler: (() => unknown) | null | undefined): Re
 export const props_key = (key: string): Record<string, unknown> => render.props_key(key);
 export const props_merge = (left: unknown, right: unknown): Record<string, unknown> => render.props_merge(left, right);
 export const dom_get_element_by_id = (id: string): unknown => render.dom_get_element_by_id(id);
+export const transitionPresence = (
+  open: Signal<boolean>,
+  props: Record<string, unknown> | null | undefined,
+  durationMs: number,
+  renderChildren: () => ComponentRenderable
+): VNode => render.transition_presence(open, props, durationMs, renderChildren);
+export const testingGetByText = (scope: unknown, value: string): unknown => render.testing_get_by_text(scope, value);
+export const testingGetByRole = (scope: unknown, role: string): unknown => render.testingGetByRole(scope, role);
+export const testingQueryAllByRole = (scope: unknown, role: string): unknown =>
+  render.testing_query_all_by_role(scope, role);
+export const devtoolsSnapshot = (): DevtoolsSnapshot => render.devtools_snapshot();
+export const installDevtools = (key?: string): Record<string, unknown> => render.install_devtools(key);
+export const ssgPage = (body: unknown, options?: unknown): string => render.ssg_page(body, options);
+export const ssgRenderApp = <P>(
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P,
+  options?: unknown
+): string => render.ssg_render_app(componentFn, props, options);
+export const ssgWritePage = (filePath: string, body: unknown, options?: unknown): string =>
+  render.ssg_write_page(filePath, body, options);
+export const ssgWriteApp = <P>(
+  filePath: string,
+  componentFn: ComponentFunction<P, ComponentRenderable>,
+  props: P,
+  options?: unknown
+): string => render.ssg_write_app(filePath, componentFn, props, options);
 
 export const reactive = {
   createSignal,

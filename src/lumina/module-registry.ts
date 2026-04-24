@@ -4701,6 +4701,8 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const componentFnType: Type = fnType([componentPropsT], vnodeT);
     const componentType: Type = fnType([componentFnType, componentPropsT], vnodeT);
     const componentKeyedType: Type = fnType([componentFnType, componentPropsT, primitive('any')], vnodeT);
+    const renderAppType: Type = componentType;
+    const renderToStringAppType: Type = fnType([componentFnType, componentPropsT], primitive('string'));
     const contextDefaultT = freshTypeVar();
     const createContextType: Type = fnType([contextDefaultT], primitive('any'));
     const createRequiredContextType: Type = fnType([], primitive('any'));
@@ -4730,6 +4732,7 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const portalType: Type = fnType([primitive('any'), primitive('any')], vnodeT);
     const portalBodyType: Type = fnType([primitive('any')], vnodeT);
     const renderChildrenType: Type = fnType([], primitive('any'));
+    const transitionPresenceType: Type = fnType([adt('Signal', [primitive('bool')]), primitive('any'), primitive('int'), renderChildrenType], vnodeT);
     const tabsRootType: Type = fnType([adt('Signal', [primitive('string')]), renderChildrenType], vnodeT);
     const tabsListType: Type = fnType([primitive('any'), renderChildrenType], vnodeT);
     const tabsTriggerType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], vnodeT);
@@ -4808,6 +4811,30 @@ export function createStdModuleRegistry(): ModuleRegistry {
     const mountType: Type = fnType([rendererT, containerT, vnodeT], renderRootT);
     const mountReactiveType: Type = fnType([rendererT, containerT, fnType([], vnodeT)], reactiveRenderRootT);
     const hydrateReactiveType: Type = fnType([rendererT, containerT, fnType([], vnodeT)], reactiveRenderRootT);
+    const mountAppType: Type = fnType([rendererT, containerT, componentFnType, componentPropsT], reactiveRenderRootT);
+    const hydrateAppType: Type = fnType([rendererT, containerT, componentFnType, componentPropsT], reactiveRenderRootT);
+    const testingCreateDomHarnessType: Type = fnType([], primitive('any'));
+    const testingMountAppType: Type = fnType([primitive('any'), componentFnType, componentPropsT], reactiveRenderRootT);
+    const testingHydrateAppType: Type = fnType([primitive('any'), componentFnType, componentPropsT], reactiveRenderRootT);
+    const testingContainerType: Type = fnType([primitive('any')], primitive('any'));
+    const testingGetByIdType: Type = fnType([primitive('any'), primitive('string')], primitive('any'));
+    const testingGetByTextType: Type = fnType([primitive('any'), primitive('string')], primitive('any'));
+    const testingGetByRoleType: Type = fnType([primitive('any'), primitive('string')], primitive('any'));
+    const testingQueryAllByRoleType: Type = fnType([primitive('any'), primitive('string')], primitive('any'));
+    const testingTextContentType: Type = fnType([primitive('any')], primitive('string'));
+    const testingClickType: Type = fnType([primitive('any')], primitive('void'));
+    const testingInputType: Type = fnType([primitive('any'), primitive('string')], primitive('void'));
+    const testingChangeCheckedType: Type = fnType([primitive('any'), primitive('bool')], primitive('void'));
+    const testingKeydownType: Type = fnType([primitive('any'), primitive('string'), primitive('bool')], primitive('void'));
+    const testingSubmitType: Type = fnType([primitive('any')], primitive('void'));
+    const devtoolsSnapshotType: Type = fnType([], primitive('any'));
+    const installDevtoolsType: Type = fnType([], primitive('any'));
+    const ssgPageType: Type = fnType([primitive('any'), primitive('any')], primitive('string'));
+    const ssgRenderAppType: Type = fnType([componentFnType, componentPropsT, primitive('any')], primitive('string'));
+    const ssgWritePageType: Type = fnType([primitive('string'), primitive('any'), primitive('any')], primitive('string'));
+    const ssgWriteAppType: Type = fnType([primitive('string'), componentFnType, componentPropsT, primitive('any')], primitive('string'));
+    const mountCustomElementType: Type = fnType([primitive('any'), componentFnType, primitive('any')], primitive('any'));
+    const defineCustomElementType: Type = fnType([primitive('string'), componentFnType, primitive('any')], primitive('any'));
     const updateType: Type = fnType([renderRootT, vnodeT], primitive('void'));
     const unmountType: Type = fnType([renderRootT], primitive('void'));
     const disposeReactiveType: Type = fnType([reactiveRenderRootT], primitive('void'));
@@ -5258,6 +5285,28 @@ export function createStdModuleRegistry(): ModuleRegistry {
           ),
         ],
         [
+          'renderApp',
+          moduleFunctionWithScheme(
+            'renderApp',
+            ['fn(any) -> VNode', 'any'],
+            'VNode',
+            schemeFromVars(renderAppType, [componentPropsT]),
+            ['renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'renderToStringApp',
+          moduleFunctionWithScheme(
+            'renderToStringApp',
+            ['fn(any) -> VNode', 'any'],
+            'string',
+            schemeFromVars(renderToStringAppType, [componentPropsT]),
+            ['renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
           'create_context',
           moduleFunctionWithScheme(
             'create_context',
@@ -5320,6 +5369,17 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'any',
             schemeFromVars(rememberType, [rememberValueT]),
             ['compute'],
+            'std://render'
+          ),
+        ],
+        [
+          'transitionPresence',
+          moduleFunctionWithScheme(
+            'transitionPresence',
+            ['Signal<bool>', 'any', 'int', 'fn() -> any'],
+            'VNode',
+            schemeFromVars(transitionPresenceType, []),
+            ['open', 'props', 'durationMs', 'renderChildren'],
             'std://render'
           ),
         ],
@@ -6266,6 +6326,281 @@ export function createStdModuleRegistry(): ModuleRegistry {
             'ReactiveRenderRoot',
             schemeFromVars(hydrateReactiveType, [containerT]),
             ['renderer', 'container', 'view'],
+            'std://render'
+          ),
+        ],
+        [
+          'mountApp',
+          moduleFunctionWithScheme(
+            'mountApp',
+            ['Renderer', 'any', 'fn(any) -> VNode', 'any'],
+            'ReactiveRenderRoot',
+            schemeFromVars(mountAppType, [containerT, componentPropsT]),
+            ['renderer', 'container', 'renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'hydrateApp',
+          moduleFunctionWithScheme(
+            'hydrateApp',
+            ['Renderer', 'any', 'fn(any) -> VNode', 'any'],
+            'ReactiveRenderRoot',
+            schemeFromVars(hydrateAppType, [containerT, componentPropsT]),
+            ['renderer', 'container', 'renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingCreateDomHarness',
+          moduleFunctionWithScheme(
+            'testingCreateDomHarness',
+            [],
+            'any',
+            schemeFromVars(testingCreateDomHarnessType, []),
+            [],
+            'std://render'
+          ),
+        ],
+        [
+          'testingMountApp',
+          moduleFunctionWithScheme(
+            'testingMountApp',
+            ['any', 'fn(any) -> VNode', 'any'],
+            'ReactiveRenderRoot',
+            schemeFromVars(testingMountAppType, [componentPropsT]),
+            ['harness', 'renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingHydrateApp',
+          moduleFunctionWithScheme(
+            'testingHydrateApp',
+            ['any', 'fn(any) -> VNode', 'any'],
+            'ReactiveRenderRoot',
+            schemeFromVars(testingHydrateAppType, [componentPropsT]),
+            ['harness', 'renderFn', 'props'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingContainer',
+          moduleFunctionWithScheme(
+            'testingContainer',
+            ['any'],
+            'any',
+            schemeFromVars(testingContainerType, []),
+            ['harness'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingBody',
+          moduleFunctionWithScheme(
+            'testingBody',
+            ['any'],
+            'any',
+            schemeFromVars(testingContainerType, []),
+            ['harness'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingGetById',
+          moduleFunctionWithScheme(
+            'testingGetById',
+            ['any', 'string'],
+            'any',
+            schemeFromVars(testingGetByIdType, []),
+            ['harness', 'id'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingGetByText',
+          moduleFunctionWithScheme(
+            'testingGetByText',
+            ['any', 'string'],
+            'any',
+            schemeFromVars(testingGetByTextType, []),
+            ['scope', 'value'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingGetByRole',
+          moduleFunctionWithScheme(
+            'testingGetByRole',
+            ['any', 'string'],
+            'any',
+            schemeFromVars(testingGetByRoleType, []),
+            ['scope', 'role'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingQueryAllByRole',
+          moduleFunctionWithScheme(
+            'testingQueryAllByRole',
+            ['any', 'string'],
+            'any',
+            schemeFromVars(testingQueryAllByRoleType, []),
+            ['scope', 'role'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingTextContent',
+          moduleFunctionWithScheme(
+            'testingTextContent',
+            ['any'],
+            'string',
+            schemeFromVars(testingTextContentType, []),
+            ['node'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingClick',
+          moduleFunctionWithScheme(
+            'testingClick',
+            ['any'],
+            'void',
+            schemeFromVars(testingClickType, []),
+            ['node'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingInput',
+          moduleFunctionWithScheme(
+            'testingInput',
+            ['any', 'string'],
+            'void',
+            schemeFromVars(testingInputType, []),
+            ['node', 'value'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingChangeChecked',
+          moduleFunctionWithScheme(
+            'testingChangeChecked',
+            ['any', 'bool'],
+            'void',
+            schemeFromVars(testingChangeCheckedType, []),
+            ['node', 'checked'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingKeydown',
+          moduleFunctionWithScheme(
+            'testingKeydown',
+            ['any', 'string', 'bool'],
+            'void',
+            schemeFromVars(testingKeydownType, []),
+            ['node', 'key', 'shiftKey'],
+            'std://render'
+          ),
+        ],
+        [
+          'testingSubmit',
+          moduleFunctionWithScheme(
+            'testingSubmit',
+            ['any'],
+            'void',
+            schemeFromVars(testingSubmitType, []),
+            ['node'],
+            'std://render'
+          ),
+        ],
+        [
+          'devtoolsSnapshot',
+          moduleFunctionWithScheme(
+            'devtoolsSnapshot',
+            [],
+            'any',
+            schemeFromVars(devtoolsSnapshotType, []),
+            [],
+            'std://render'
+          ),
+        ],
+        [
+          'installDevtools',
+          moduleFunctionWithScheme(
+            'installDevtools',
+            [],
+            'any',
+            schemeFromVars(installDevtoolsType, []),
+            [],
+            'std://render'
+          ),
+        ],
+        [
+          'ssgPage',
+          moduleFunctionWithScheme(
+            'ssgPage',
+            ['any', 'any'],
+            'string',
+            schemeFromVars(ssgPageType, []),
+            ['body', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'ssgRenderApp',
+          moduleFunctionWithScheme(
+            'ssgRenderApp',
+            ['fn(any) -> VNode', 'any', 'any'],
+            'string',
+            schemeFromVars(ssgRenderAppType, [componentPropsT]),
+            ['renderFn', 'props', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'ssgWritePage',
+          moduleFunctionWithScheme(
+            'ssgWritePage',
+            ['string', 'any', 'any'],
+            'string',
+            schemeFromVars(ssgWritePageType, []),
+            ['filePath', 'body', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'ssgWriteApp',
+          moduleFunctionWithScheme(
+            'ssgWriteApp',
+            ['string', 'fn(any) -> VNode', 'any', 'any'],
+            'string',
+            schemeFromVars(ssgWriteAppType, [componentPropsT]),
+            ['filePath', 'renderFn', 'props', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'mountCustomElement',
+          moduleFunctionWithScheme(
+            'mountCustomElement',
+            ['any', 'fn(any) -> VNode', 'any'],
+            'any',
+            schemeFromVars(mountCustomElementType, [componentPropsT]),
+            ['host', 'renderFn', 'options'],
+            'std://render'
+          ),
+        ],
+        [
+          'defineCustomElement',
+          moduleFunctionWithScheme(
+            'defineCustomElement',
+            ['string', 'fn(any) -> VNode', 'any'],
+            'any',
+            schemeFromVars(defineCustomElementType, [componentPropsT]),
+            ['tagName', 'renderFn', 'options'],
             'std://render'
           ),
         ],

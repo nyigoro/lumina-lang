@@ -1,0 +1,9 @@
+import { render } from "@std";
+
+pub fn mountCustomElement<P>(host: any, renderFn: fn(P) -> VNode, options: any) -> any {
+  render.mountCustomElement(host, renderFn, options)
+}
+
+pub fn defineCustomElement<P>(tagName: string, renderFn: fn(P) -> VNode, options: any) -> any {
+  render.defineCustomElement(tagName, renderFn, options)
+}

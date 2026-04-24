@@ -1,18 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { compileGrammar } from '../src/grammar/index.js';
 import { analyzeLumina } from '../src/lumina/semantic.js';
 import { inferProgram } from '../src/lumina/hm-infer.js';
 import { generateJSFromAst } from '../src/lumina/codegen-js.js';
 import type { LuminaProgram } from '../src/lumina/ast.js';
-import * as runtime from '../src/lumina-runtime.js';
-
-const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
-const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
-const parser = compileGrammar(luminaGrammar);
+import { parseLuminaProgram } from './helpers/lumina-parser.js';
 const routerStdPath = path.resolve(__dirname, '../std/router.lm');
 const routerStdSource = fs.readFileSync(routerStdPath, 'utf-8');
 let cachedRouterApi: RouterApi | null = null;
+
+type OptionValue<T = unknown> = { $tag: 'Some'; $payload: T } | { $tag: 'None' };
+type VNode =
+  | { kind: 'text'; text: string }
+  | { kind: 'element'; tag: string; props: Record<string, unknown>; children: VNode[] };
+
+type TestSignal<T> = { value: T; subscribers: Set<TestEffectRunner> };
+type TestEffectRunner = {
+  run: () => void;
+  dispose: () => void;
+  deps: Set<TestSignal<unknown>>;
+  disposed: boolean;
+};
 
 type RouterApi = {
   createRouter: (base: string) => unknown;
@@ -23,7 +31,7 @@ type RouterApi = {
   matchRoute: (pattern: string, path: string) => boolean;
   extractParams: (pattern: string, path: string) => unknown;
   onRouteChange: (routerValue: unknown, handler: (path: string) => void) => unknown;
-  link: (routerValue: unknown, href: string, label: string) => runtime.VNode;
+  link: (routerValue: unknown, href: string, label: string) => VNode;
 };
 
 type BrowserEnvHandle = {
@@ -42,10 +50,163 @@ type BrowserEnvHandle = {
   };
 };
 
-const parseProgram = (source: string): LuminaProgram => parser.parse(source) as LuminaProgram;
+const parseProgram = (source: string): LuminaProgram => parseLuminaProgram(source);
 
 const getTag = (value: unknown): string => ((value as { $tag?: string })?.$tag ?? '');
 const getPayload = <T = unknown>(value: unknown): T => (value as { $payload?: T }).$payload as T;
+const some = <T>(value: T): OptionValue<T> => ({ $tag: 'Some', $payload: value });
+const none = (): OptionValue => ({ $tag: 'None' });
+
+let activeEffect: TestEffectRunner | null = null;
+
+const runtimeHashmap = {
+  get: (map: unknown, key: string): OptionValue =>
+    map instanceof Map && map.has(key) ? some(map.get(key)) : none(),
+};
+
+const runtimeStr = {
+  length: (value: string) => value.length,
+  concat: (a: string, b: string) => a + b,
+  substring: (value: string, start: number, end: number) => value.substring(start, end),
+};
+
+const runtimeReactive = {
+  createSignal<T>(initial: T): TestSignal<T> {
+    return { value: initial, subscribers: new Set() };
+  },
+  get<T>(signal: TestSignal<T>): T {
+    if (activeEffect) {
+      signal.subscribers.add(activeEffect);
+      activeEffect.deps.add(signal as TestSignal<unknown>);
+    }
+    return signal.value;
+  },
+  set<T>(signal: TestSignal<T>, next: T): boolean {
+    if (Object.is(signal.value, next)) return false;
+    signal.value = next;
+    for (const effect of [...signal.subscribers]) {
+      effect.run();
+    }
+    return true;
+  },
+  createEffect(fn: () => void): TestEffectRunner {
+    const effect: TestEffectRunner = {
+      deps: new Set(),
+      disposed: false,
+      run: () => {
+        if (effect.disposed) return;
+        for (const dep of effect.deps) dep.subscribers.delete(effect);
+        effect.deps.clear();
+        const previous = activeEffect;
+        activeEffect = effect;
+        try {
+          fn();
+        } finally {
+          activeEffect = previous;
+        }
+      },
+      dispose: () => {
+        effect.disposed = true;
+        for (const dep of effect.deps) dep.subscribers.delete(effect);
+        effect.deps.clear();
+      },
+    };
+    effect.run();
+    return effect;
+  },
+  disposeEffect(effect: unknown): void {
+    (effect as TestEffectRunner | undefined)?.dispose?.();
+  },
+};
+
+const runtimeRender = {
+  props_merge: (...parts: Array<Record<string, unknown> | null | undefined>): Record<string, unknown> =>
+    Object.assign({}, ...parts.filter(Boolean)),
+  props_class: (className: string): Record<string, unknown> => ({ className }),
+  props_href: (href: string): Record<string, unknown> => ({ href }),
+  props_on_click: (handler: () => unknown): Record<string, unknown> => ({
+    onClick: (event?: Event) => {
+      const result = handler();
+      if (result === false) event?.preventDefault?.();
+      return result;
+    },
+  }),
+  element: (tag: string, props: Record<string, unknown>, children: VNode[]): VNode => ({
+    kind: 'element',
+    tag,
+    props,
+    children,
+  }),
+  text: (value: string): VNode => ({ kind: 'text', text: value }),
+};
+
+const splitPathSegments = (value: string): string[] =>
+  value
+    .split('/')
+    .filter((segment) => segment.length > 0);
+
+const runtimeRouter = {
+  getCurrentPath: (): string => String((globalThis as { location?: { pathname?: string } }).location?.pathname ?? '/'),
+  getCurrentHash: (): string => String((globalThis as { location?: { hash?: string } }).location?.hash ?? ''),
+  getCurrentSearch: (): string => String((globalThis as { location?: { search?: string } }).location?.search ?? ''),
+  push: (path: string): void => {
+    (globalThis as { history?: { pushState?: (data: unknown, unused: string, url?: string | URL | null) => void } }).history?.pushState?.(
+      null,
+      '',
+      path
+    );
+    (globalThis as { window?: { dispatchEvent?: (event: Event) => boolean } }).window?.dispatchEvent?.(new Event('popstate'));
+  },
+  replace: (path: string): void => {
+    (globalThis as { history?: { replaceState?: (data: unknown, unused: string, url?: string | URL | null) => void } }).history?.replaceState?.(
+      null,
+      '',
+      path
+    );
+    (globalThis as { window?: { dispatchEvent?: (event: Event) => boolean } }).window?.dispatchEvent?.(new Event('popstate'));
+  },
+  onPopState: (listener: (pathname: string) => void): void => {
+    (globalThis as { window?: { addEventListener?: (type: string, listener: EventListener) => void } }).window?.addEventListener?.(
+      'popstate',
+      () => listener(runtimeRouter.getCurrentPath())
+    );
+  },
+  parseSearchParams: (search: string): Map<string, string> => {
+    const params = new Map<string, string>();
+    const query = search.startsWith('?') ? search.slice(1) : search;
+    if (!query) return params;
+    for (const pair of query.split('&')) {
+      if (!pair) continue;
+      const [key, value = ''] = pair.split('=');
+      params.set(decodeURIComponent(key), decodeURIComponent(value));
+    }
+    return params;
+  },
+  matchRoute: (pattern: string, path: string): boolean => {
+    if (pattern === '*') return true;
+    const pat = splitPathSegments(pattern);
+    const actual = splitPathSegments(path);
+    if (pat.length !== actual.length) return false;
+    for (let i = 0; i < pat.length; i += 1) {
+      const part = pat[i];
+      if (part.startsWith(':')) continue;
+      if (part !== actual[i]) return false;
+    }
+    return true;
+  },
+  extractParams: (pattern: string, path: string): Map<string, string> => {
+    const params = new Map<string, string>();
+    const pat = splitPathSegments(pattern);
+    const actual = splitPathSegments(path);
+    for (let i = 0; i < Math.min(pat.length, actual.length); i += 1) {
+      const part = pat[i];
+      if (part.startsWith(':')) {
+        params.set(part.slice(1), actual[i]);
+      }
+    }
+    return params;
+  },
+};
 
 const bindRouterRuntime = (js: string): string =>
   js
@@ -78,30 +239,21 @@ const compileRouterStdlib = (): RouterApi => {
     '__runtimeStr',
     'reactive',
     'render',
-    'vec',
-    'hashmap',
-    'Option',
     'module',
     `${js}\nreturn { createRouter, navigate, replace, currentPath, currentParams, matchRoute, extractParams, onRouteChange, link };`
   ) as (
-    routerModule: typeof runtime.router,
-    strModule: typeof runtime.str,
-    reactiveModule: typeof runtime.reactive,
-    renderModule: typeof runtime.render,
-    vecModule: typeof runtime.vec,
-    hashmapModule: typeof runtime.hashmap,
-    optionModule: typeof runtime.Option,
+    routerModule: typeof runtimeRouter,
+    strModule: typeof runtimeStr,
+    reactiveModule: typeof runtimeReactive,
+    renderModule: typeof runtimeRender,
     moduleHandle: { exports: Record<string, unknown> }
   ) => RouterApi;
 
   cachedRouterApi = factory(
-    runtime.router,
-    runtime.str,
-    runtime.reactive,
-    runtime.render,
-    runtime.vec,
-    runtime.hashmap,
-    runtime.Option,
+    runtimeRouter,
+    runtimeStr,
+    runtimeReactive,
+    runtimeRender,
     { exports: {} }
   );
   return cachedRouterApi;
@@ -219,10 +371,10 @@ describe('@std/router', () => {
     const userParams = routerApi.extractParams('/users/:id', '/users/42');
     const editParams = routerApi.extractParams('/posts/:id/edit', '/posts/5/edit');
 
-    expect(getTag(runtime.hashmap.get(userParams as never, 'id'))).toBe('Some');
-    expect(getPayload(runtime.hashmap.get(userParams as never, 'id'))).toBe('42');
-    expect(getTag(runtime.hashmap.get(editParams as never, 'id'))).toBe('Some');
-    expect(getPayload(runtime.hashmap.get(editParams as never, 'id'))).toBe('5');
+    expect(getTag(runtimeHashmap.get(userParams as never, 'id'))).toBe('Some');
+    expect(getPayload(runtimeHashmap.get(userParams as never, 'id'))).toBe('42');
+    expect(getTag(runtimeHashmap.get(editParams as never, 'id'))).toBe('Some');
+    expect(getPayload(runtimeHashmap.get(editParams as never, 'id'))).toBe('5');
   });
 
   test('createRouter reads initial path, respects base path, and exposes current search params', () => {
@@ -236,9 +388,9 @@ describe('@std/router', () => {
     const pathSignal = routerApi.currentPath(routerValue);
     const params = routerApi.currentParams(routerValue);
 
-    expect(runtime.get(pathSignal as never)).toBe('/lumina');
-    expect(getPayload(runtime.hashmap.get(params as never, 'tab'))).toBe('demo');
-    expect(getPayload(runtime.hashmap.get(params as never, 'view'))).toBe('js');
+    expect(runtimeReactive.get(pathSignal as never)).toBe('/lumina');
+    expect(getPayload(runtimeHashmap.get(params as never, 'tab'))).toBe('demo');
+    expect(getPayload(runtimeHashmap.get(params as never, 'view'))).toBe('js');
   });
 
   test('createRouter upgrades legacy hash routes used by static fallback redirects', () => {
@@ -250,7 +402,7 @@ describe('@std/router', () => {
 
     const routerValue = routerApi.createRouter('/app');
 
-    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
+    expect(runtimeReactive.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
     expect(env.window.history.replacements.at(-1)).toBe('/app/lumina');
   });
 
@@ -261,11 +413,11 @@ describe('@std/router', () => {
     const routerValue = routerApi.createRouter('/app');
     routerApi.navigate(routerValue, '/playground');
     expect(env.window.history.pushes.at(-1)).toBe('/app/playground');
-    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/playground');
+    expect(runtimeReactive.get(routerApi.currentPath(routerValue) as never)).toBe('/playground');
 
     routerApi.replace(routerValue, '/lumina');
     expect(env.window.history.replacements.at(-1)).toBe('/app/lumina');
-    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
+    expect(runtimeReactive.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
   });
 
   test('back and forward style popstate dispatch updates the router signal', () => {
@@ -276,7 +428,7 @@ describe('@std/router', () => {
     env.window.location.pathname = '/app/playground';
     env.window.dispatchEvent(new Event('popstate'));
 
-    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/playground');
+    expect(runtimeReactive.get(routerApi.currentPath(routerValue) as never)).toBe('/playground');
   });
 
   test('onRouteChange runs when the route signal changes', async () => {
@@ -294,7 +446,7 @@ describe('@std/router', () => {
 
     expect(seen).toContain('/');
     expect(seen).toContain('/lumina');
-    runtime.reactive.disposeEffect(effect as never);
+    runtimeReactive.disposeEffect(effect as never);
   });
 
   test('link renders an anchor, navigates on click, and prevents full page reload', () => {
@@ -314,6 +466,6 @@ describe('@std/router', () => {
 
     expect(preventDefault).toHaveBeenCalled();
     expect(env.window.location.pathname).toBe('/app/lumina');
-    expect(runtime.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
+    expect(runtimeReactive.get(routerApi.currentPath(routerValue) as never)).toBe('/lumina');
   });
 });

@@ -240,4 +240,285 @@ describe('runtime render module', () => {
       })
     ).toThrow();
   });
+
+  test('app-level SSR helpers support stateful components', () => {
+    const App = ({ label }: { label: string }) => {
+      const count = render.state(1);
+      return render.element('button', { id: 'counter' }, [
+        render.text(`${label}:${render.get(count)}`),
+      ]);
+    };
+
+    const vnode = render.renderApp(App, { label: 'Clicks' });
+    expect(vnode.kind).toBe('element');
+    expect(render.renderToStringApp(App, { label: 'Clicks' })).toContain('Clicks:1');
+  });
+
+  test('testing harness mounts apps and drives interactions', async () => {
+    const App = ({ label }: { label: string }) => {
+      const count = render.state(1);
+      const value = render.state('');
+      return render.element('form', { id: 'form', onSubmit: () => render.set(count, render.get(count) + 1) }, [
+        render.element('button', { id: 'counter', onClick: () => render.set(count, render.get(count) + 1) }, [
+          render.text(`${label}:${render.get(count)}`),
+        ]),
+        render.element('input', {
+          id: 'name',
+          value: render.get(value),
+          onInput: (event: { target?: { value?: string } }) => render.set(value, event.target?.value ?? ''),
+        }, []),
+        render.element('p', { id: 'echo' }, [render.text(render.get(value))]),
+      ]);
+    };
+
+    const harness = render.testingCreateDomHarness();
+    const root = render.testingMountApp(harness, App, { label: 'Clicks' }) as ReturnType<typeof render.mount_reactive>;
+
+    const button = render.testingGetById(harness, 'counter');
+    const input = render.testingGetById(harness, 'name');
+    expect(render.testingBody(harness)).toBeTruthy();
+    expect(render.testingContainer(harness)).toBeTruthy();
+    expect(render.testingTextContent(button)).toBe('Clicks:1');
+
+    render.testingClick(button);
+    await Promise.resolve();
+    expect(render.testingTextContent(button)).toBe('Clicks:2');
+
+    render.testingInput(input, 'Ada');
+    await Promise.resolve();
+    expect(render.testingTextContent(render.testingGetById(harness, 'echo'))).toBe('Ada');
+
+    render.testingSubmit(render.testingGetById(harness, 'form'));
+    await Promise.resolve();
+    expect(render.testingTextContent(render.testingGetById(harness, 'counter'))).toBe('Clicks:3');
+
+    render.dispose_reactive(root);
+  });
+
+  test('hydrateApp preserves existing host nodes and stays reactive', async () => {
+    const App = ({ label }: { label: string }) => {
+      const count = render.state(1);
+      return render.element('button', { id: 'counter', onClick: () => render.set(count, render.get(count) + 1) }, [
+        render.text(`${label}:${render.get(count)}`),
+      ]);
+    };
+
+    const harness = render.testingCreateDomHarness() as { document: unknown; container: unknown };
+    const renderer = render.create_dom_renderer({ document: harness.document as never });
+    render.mount(renderer, harness.container, render.renderApp(App, { label: 'Hydrate' }));
+
+    const before = render.testingGetById(harness, 'counter');
+    const reactive = render.hydrateApp(renderer, harness.container, App, { label: 'Hydrate' }) as ReturnType<
+      typeof render.mount_reactive
+    >;
+    const after = render.testingGetById(harness, 'counter');
+
+    expect(after).toBe(before);
+    render.testingClick(after);
+    await Promise.resolve();
+    expect(render.testingTextContent(render.testingGetById(harness, 'counter'))).toBe('Hydrate:2');
+
+    render.dispose_reactive(reactive);
+  });
+
+  test('custom element helpers mount and react to attribute changes', async () => {
+    const App = ({ label }: { label?: string | null }) =>
+      render.element('span', { id: 'value' }, [render.text(label ?? 'unset')]);
+
+    type ShadowHost = {
+      setAttribute: (name: string, value: string) => void;
+      shadowRoot?: unknown;
+    };
+    const harness = render.testingCreateDomHarness() as {
+      document: { createElement: (tag: string) => ShadowHost };
+    };
+    const host = harness.document.createElement('lumina-card');
+    host.setAttribute('label', 'Hello');
+
+    const controller = render.mountCustomElement(host, App, {
+      observedAttributes: ['label'],
+      useShadow: true,
+    });
+
+    await Promise.resolve();
+    expect(render.testingTextContent(host.shadowRoot)).toContain('Hello');
+
+    host.setAttribute('label', 'World');
+    controller.syncAttributes();
+    await Promise.resolve();
+    expect(render.testingTextContent(host.shadowRoot)).toContain('World');
+
+    controller.disconnect();
+  });
+
+  test('defineCustomElement wires registry lifecycle callbacks', async () => {
+    const App = ({ label }: { label?: string | null }) =>
+      render.element('span', { id: 'value' }, [render.text(label ?? 'unset')]);
+
+    type ShadowNodeFactory = { createElement: (tag: string) => unknown };
+    const harness = render.testingCreateDomHarness() as { document: ShadowNodeFactory };
+    const registry = {
+      values: new Map<string, unknown>(),
+      get(name: string) {
+        return this.values.get(name);
+      },
+      define(name: string, ctor: unknown) {
+        this.values.set(name, ctor);
+      },
+    };
+
+    class FakeElementHost {
+      ownerDocument = harness.document;
+      private readonly attrs = new Map<string, string>();
+      shadowRoot: unknown = null;
+
+      getAttribute(name: string): string | null {
+        return this.attrs.get(name) ?? null;
+      }
+
+      setAttribute(name: string, value: string): void {
+        this.attrs.set(name, value);
+      }
+
+      attachShadow(): unknown {
+        if (!this.shadowRoot) {
+          this.shadowRoot = this.ownerDocument.createElement('shadow-root');
+        }
+        return this.shadowRoot;
+      }
+    }
+
+    const Custom = render.defineCustomElement('lumina-pill', App, {
+      observedAttributes: ['label'],
+      useShadow: true,
+      registry,
+      baseClass: FakeElementHost,
+    }) as new () => FakeElementHost & {
+      connectedCallback?: () => void;
+      attributeChangedCallback?: () => void;
+      disconnectedCallback?: () => void;
+    };
+
+    expect(registry.get('lumina-pill')).toBe(Custom);
+
+    const element = new Custom();
+    element.setAttribute('label', 'Alpha');
+    element.connectedCallback?.();
+    await Promise.resolve();
+    expect(render.testingTextContent(element.shadowRoot)).toContain('Alpha');
+
+    element.setAttribute('label', 'Beta');
+    element.attributeChangedCallback?.();
+    await Promise.resolve();
+    expect(render.testingTextContent(element.shadowRoot)).toContain('Beta');
+
+    element.disconnectedCallback?.();
+  });
+
+  test('transition presence keeps exiting content mounted until the timeout ends', async () => {
+    const App = () => {
+      const open = render.state(false);
+      return render.element('div', {}, [
+        render.element('button', { id: 'toggle', onClick: () => render.set(open, !render.get(open)) }, [render.text('toggle')]),
+        render.transitionPresence(open, { id: 'panel', className: 'transition' }, 10, () => [
+          render.text('Panel'),
+        ]),
+      ]);
+    };
+
+    const harness = render.testingCreateDomHarness();
+    const root = render.testingMountApp(harness, App, null);
+
+    expect(render.testingGetById(harness, 'panel')).toBeNull();
+
+    render.testingClick(render.testingGetById(harness, 'toggle'));
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(render.testingGetById(harness, 'panel')).toBeTruthy();
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await Promise.resolve();
+    expect(
+      (render.testingGetById(harness, 'panel') as { getAttribute?: (name: string) => string | null } | null)
+        ?.getAttribute?.('data-transition-state')
+    ).toBe('entered');
+
+    render.testingClick(render.testingGetById(harness, 'toggle'));
+    await Promise.resolve();
+    expect(render.testingGetById(harness, 'panel')).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(render.testingGetById(harness, 'panel')).toBeNull();
+
+    render.dispose_reactive(root);
+  });
+
+  test('testing queries find portal content by text and role', async () => {
+    const App = () => {
+      const open = render.state(true);
+      return render.dialogRoot(open, () => render.dialogPortal([
+        render.dialogOverlay({}),
+        render.dialogContent({ id: 'dialog' }, [
+          render.dialogTitle({}, [render.text('Profile')]),
+          render.element('button', { id: 'save' }, [render.text('Save')]),
+        ]),
+      ]));
+    };
+
+    const harness = render.testingCreateDomHarness();
+    const root = render.testingMountApp(harness, App, null);
+
+    expect(render.testingGetByText(harness, 'Profile')).toBeTruthy();
+    expect(
+      (render.testingGetByRole(harness, 'dialog') as { getAttribute?: (name: string) => string | null } | null)
+        ?.getAttribute?.('id')
+    ).toBe('dialog');
+    expect(render.testingQueryAllByRole(harness, 'button')).toHaveLength(1);
+
+    render.dispose_reactive(root);
+  });
+
+  test('devtools snapshot exposes roots, resources, and signals', async () => {
+    const loader = jest.fn(async () => 'ready');
+    const App = () => {
+      const count = render.state(1);
+      const resource = render.createResource('devtools:profile', loader);
+      return render.element('div', { id: 'app' }, [
+        render.text(render.get(count)),
+        render.suspense(render.text('Loading'), () => [render.text(render.resourceRead(resource))]),
+      ]);
+    };
+
+    const harness = render.testingCreateDomHarness();
+    const root = render.testingMountApp(harness, App, null);
+    const globalHandle = render.installDevtools() as { snapshot: () => unknown };
+
+    await Promise.resolve();
+    await Promise.resolve();
+    const snapshot = render.devtoolsSnapshot() as {
+      roots: Array<{ frames: Array<{ slots: Array<{ kind: string }>; children: unknown[] }> }>;
+      resources: Array<{ key: string; status: string }>;
+      signals: Array<{ kind: string }>;
+    };
+    expect(snapshot.roots.length).toBeGreaterThan(0);
+    expect(snapshot.resources.some((resource) => resource.key === 'devtools:profile')).toBe(true);
+    expect(snapshot.signals.some((signal) => signal.kind === 'signal')).toBe(true);
+    expect((globalThis as { __LUMINA_DEVTOOLS__?: unknown }).__LUMINA_DEVTOOLS__).toBe(globalHandle);
+
+    render.dispose_reactive(root);
+  });
+
+  test('ssg helpers render and write HTML documents', () => {
+    const App = ({ label }: { label: string }) =>
+      render.element('main', {}, [render.text(label)]);
+
+    const html = render.ssgRenderApp(App, { label: 'Hello' }, {
+      title: 'Demo',
+      hydrateModule: '/main.generated.js',
+    });
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('<title>Demo</title>');
+    expect(html).toContain('Hello');
+    expect(html).toContain('/main.generated.js');
+  });
 });

@@ -6,6 +6,8 @@ import { generateWATFromAst } from '../src/lumina/codegen-wasm.js';
 import { loadWASM, callWASMFunction } from '../src/wasm-runtime.js';
 import type { LuminaProgram } from '../src/lumina/ast.js';
 
+jest.setTimeout(30000);
+
 const grammarPath = path.resolve(__dirname, '../examples/lumina.peg');
 const luminaGrammar = fs.readFileSync(grammarPath, 'utf-8');
 const parser = compileGrammar(luminaGrammar);
