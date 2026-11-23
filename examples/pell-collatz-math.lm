@@ -1,0 +1,85 @@
+// @date 23rd November, 2026
+
+/*
+ * ++ Pell Numbers ++
+ *
+ * Pell numbers are close cousin of Fibonacci
+ * In fibonacci, its: fib(n) = fib(n - 1) + fib(n - 2)
+ * In pell, its just: pell(n) = 2 * pell(n - 1) + pell(n - 2)
+ * 
+ * with pell(0) = 0, and pell(1) = 1
+ */
+
+// takes O(2^n) complexity
+fn pell_naive(num: int) -> int {
+  if num <= 1 {
+    num 
+  } else {
+    2 * pell_naive(num - 1) + pell_naive(num - 2)
+  }
+}
+
+// takes O(n) complexity - window sliding algorithm
+fn pell_window(num: int) -> int {
+  if num <= 1 {
+    num
+  } else {
+    let mut a: int = 0;
+    let mut b: int = 1;
+    let mut c: int = 2;
+    for _ in 2..num {
+      a = c;
+      c = 2 * c + b;
+      b = a;
+    }
+    c
+  }
+}
+
+/*
+ * ++ Collatz Conjecture ++
+ *
+ * Collatz series is defined as for any natural number n:
+ *   
+ *   f(n) = n / 2       ( if n even )
+ *   f(n) = 3 * n + 1   ( if n odd)
+ * 
+ * Keep repeating this over & over, one will observe it inevitably ends in 1 (though none can prove it generally)
+ */
+
+ func collatz(num:int, printResult:bool = false) {
+     steps = [num]
+     while num != 1 {
+         if num % 2 == 0 {
+             num /= 2
+             steps.push(num)
+         } else {
+             num = 3 * num + 1
+             steps.push(num)
+         }
+     }
+     if printResult {
+         print("Number of steps to reach 1: ", len(steps) - 1)
+         print("Steps: ", steps)
+     }
+     return steps
+ }
+
+fn collatz_steps(mut num: int) -> int {
+  let mut steps: int = 0;
+  while num != 1 {
+    match num % 2 {
+      0 => num /= 2,
+      _ => num = 3 * num + 1,
+    }
+    steps += 1;
+  }
+  steps
+}
+
+fn main() {
+  io.println(str.concat("Pell(5) = ", str.from_int(pell_naive(5))));
+  io.println(str.concat("Pell(12) = ", str.from_int(pell_window(2))));
+  io.println(str.concat("CollatzSteps(17) = ", str.from_int(collatz_steps(17))));
+  io.println(str.concat("CollatzSteps(101) = ", str.from_int(collatz_steps(101))));
+}
